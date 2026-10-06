@@ -4,3 +4,4 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  MDT_API_BASE_URL = "https://m88projecttracker-api.5-223-78-194.sslip.io"
