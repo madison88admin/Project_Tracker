@@ -717,14 +717,15 @@ app.delete('/api/subprojects/:id', (req, res) => {
   log(db, 'User', `Sub-project deleted: ${gone.name}`); saveDB(db); res.json({ ok: true });
 });
 
-// HQ sync: pulls live project list + progress from the M88 IT Headquarters Supabase
-// (same public anon key the HQ site itself ships in its JS bundle; override via env)
+// HQ sync: pulls live project list + progress from the M88 IT Headquarters Supabase.
+// Keep both values in the VPS environment; never commit Supabase credentials.
 const HQ = {
-  url: process.env.HQ_SUPABASE_URL || 'https://bmlmxeakyivzwjwemrov.supabase.co',
-  key: process.env.HQ_SUPABASE_KEY || 'sb_publishable_QrZIapvR0-7Cl0joIg4kbA_Xwzon0m0',
+  url: String(process.env.HQ_SUPABASE_URL || '').replace(/\/$/, ''),
+  key: String(process.env.HQ_SUPABASE_KEY || ''),
   table: 'dashboard_content'
 };
 async function fetchHQProjects() {
+  if (!HQ.url || !HQ.key) throw new Error('HQ sync is not configured: set HQ_SUPABASE_URL and HQ_SUPABASE_KEY');
   let r, last;
   for (let attempt = 0; attempt < 3; attempt++) {
     try { r = await fetch(`${HQ.url}/rest/v1/${HQ.table}?key=eq.projects&select=value`, { headers: { apikey: HQ.key, Authorization: 'Bearer ' + HQ.key }, signal: AbortSignal.timeout(8000) }); break; }
