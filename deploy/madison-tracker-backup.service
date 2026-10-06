@@ -1,0 +1,8 @@
+[Unit]
+Description=Madison Dev Tracker database backup
+
+[Service]
+Type=oneshot
+WorkingDirectory=/var/www/madison-dev-tracker
+EnvironmentFile=/var/www/madison-dev-tracker/.env
+ExecStart=/usr/bin/npm run backup

@@ -8,8 +8,24 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 
+function loadEnvFile(file) {
+  if (!fs.existsSync(file)) return;
+  for (const raw of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (!match || process.env[match[1]] !== undefined) continue;
+    let value = match[2].trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+    process.env[match[1]] = value.replace(/\\n/g, '\n');
+  }
+}
+loadEnvFile(path.join(__dirname, '.env'));
+
 const PORT = process.env.PORT || 3100;
 const AUTH_TOKEN = process.env.MDT_AUTH_TOKEN || '';
+const CORS_ORIGINS = new Set(String(process.env.MDT_CORS_ORIGINS || 'http://localhost:3100,http://127.0.0.1:3100')
+  .split(',').map(x => x.trim().replace(/\/$/, '')).filter(Boolean));
 const DB_DIR = path.join(__dirname, 'data');
 const DB_FILE = path.join(DB_DIR, 'db.json');
 const eventClients = new Set();
@@ -412,7 +428,15 @@ if (templateBackfill) { log(db, 'System', `Backfilled SDLC template phases: ${te
 if (migrated) { log(db, 'System', 'Migrated DB (stages, projects, assignee)'); saveDB(db); }
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || CORS_ORIGINS.has('*') || CORS_ORIGINS.has(String(origin).replace(/\/$/, ''))) return callback(null, true);
+    return callback(null, false);
+  },
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  maxAge: 86400
+}));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'public'), { setHeaders: res => res.set('Cache-Control', 'no-store') }));
 app.use('/api', (req,res,next)=>{ res.set('Cache-Control','no-store'); next(); });

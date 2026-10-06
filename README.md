@@ -21,6 +21,18 @@ npm start
 ```
 Buksan: http://localhost:3100 — LAN: http://<pc-ip>:3100. **Walang login — dashboard agad.**
 
+## Netlify frontend + VPS backend
+
+The Netlify site publishes `public/` only. The Node/Express API stays on the VPS.
+
+1. Copy `.env.example` to `.env` on the VPS and set `MDT_CORS_ORIGINS` to the exact Netlify URL, `MDT_AUTH_TOKEN`, and the HQ Supabase variables.
+2. In Netlify, set `MDT_API_BASE_URL` to the HTTPS URL of the VPS API, for example `https://api.example.com`.
+3. Netlify uses `netlify.toml`: no framework build is required; it generates `public/runtime-config.js` and publishes `public/`.
+4. Run the backend with PM2: `npm install`, `pm2 start ecosystem.config.cjs`, then `pm2 save` and `pm2 startup`.
+5. Install the backup timer from `deploy/`: copy the service and timer to `/etc/systemd/system/`, run `systemctl daemon-reload`, `systemctl enable --now madison-tracker-backup.timer`, and verify with `systemctl list-timers`.
+
+The VPS should expose the API through HTTPS (Nginx/Caddy + a TLS certificate). The frontend uses the same configured API base for normal requests, PPT exports, JSON export, and SSE realtime updates.
+
 ## 3-stage flow (v1.2)
 **Pipeline → In Development → Completed.** Drag-drop lang sa Kanban, auto-log sa updates + activity.
 Smoke test: `node smoke-test.js` (server must be running).

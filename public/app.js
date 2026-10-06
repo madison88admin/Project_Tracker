@@ -1,15 +1,17 @@
 /* Madison Dev Tracker frontend — projects-first, no build step */
 const $ = s => document.querySelector(s);
+const API_BASE = String(window.MDT_CONFIG?.apiBase || '').replace(/\/$/, '');
+const apiUrl = p => /^https?:\/\//i.test(p) ? p : API_BASE + (String(p).startsWith('/') ? p : '/' + p);
 const api = {
   async get(p){
-    const r=await fetch(p,{headers:authHeaders()});
+    const r=await fetch(apiUrl(p),{headers:authHeaders()});
     let j=null; try{ j=await r.json(); }catch(e){}
     if(r.status===401){ const t=await promptModal('Enter tracker access token','',{title:'Authentication required'}); if(t){localStorage.setItem('mdt_token',t); location.reload();} }
     if(!r.ok) throw new Error((j&&j.error)||('HTTP '+r.status));
     return j;
   },
   async send(p, m, b){
-    const r = await fetch(p,{method:m,headers:{'Content-Type':'application/json',...authHeaders()},body:b?JSON.stringify(b):undefined});
+    const r = await fetch(apiUrl(p),{method:m,headers:{'Content-Type':'application/json',...authHeaders()},body:b?JSON.stringify(b):undefined});
     let j=null; try{ j=await r.json(); }catch(e){}
     if(!r.ok) throw new Error((j&&j.error)||('HTTP '+r.status));
     return j;
@@ -25,7 +27,7 @@ let refreshTimer=null, refreshBusy=false, refreshQueued=false;
 async function updatePresence(systemId='',projectId=''){ const name=myName(); if(!name) return; presenceContext={systemId,projectId}; try{ const r=await api.send('/api/presence','POST',{sessionId:presenceId,name,systemId,projectId}); S.presence=r.viewers||[]; const el=$('#presenceBar'); if(el) el.innerHTML=presenceHtml(); }catch(e){} }
 function presenceHtml(){ const others=S.presence.filter(p=>p.sessionId!==presenceId); return others.length?`<span class="presence-live">●</span><b>Viewing now:</b> ${others.map(p=>`${avatar(p.name,20)} <span>${esc(p.name)}</span>`).join(' ')}`:'<span class="mut">● No other viewers</span>'; }
 setInterval(()=>updatePresence(presenceContext.systemId,presenceContext.projectId),30000);
-const changeEvents = new EventSource('/api/events');
+const changeEvents = new EventSource(apiUrl('/api/events'));
 changeEvents.onmessage = e => { try { if(JSON.parse(e.data).type==='data') queueRefresh(); } catch(err){} };
 changeEvents.onerror = () => {}; // browser automatically reconnects
 const sysName = id => (S.systems.find(s=>s.id===id)||{name:id}).name;
@@ -275,7 +277,7 @@ window.exportPortfolioReport=async()=>{
   const scope=reportScopeProjects();
   toast('Preparing portfolio executive PPT…');
   try{
-    const r=await fetch('/api/reports/portfolio.pptx',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({projectIds:selected,include,filters:{systemLabel:system?sysName(system):'All systems',developerLabel:developer||'All developers',statusLabel:status||'All statuses'}})});
+    const r=await fetch(apiUrl('/api/reports/portfolio.pptx'),{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({projectIds:selected,include,filters:{systemLabel:system?sysName(system):'All systems',developerLabel:developer||'All developers',statusLabel:status||'All statuses'}})});
     if(!r.ok){let j=null;try{j=await r.json()}catch(e){}throw new Error(j?.error||('HTTP '+r.status));}
     const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a'); a.href=url; a.download='madison-portfolio-executive-report.pptx'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),2000); toast(`Portfolio report ready · ${scope.length} projects`);
   }catch(e){ toast('Portfolio export failed: '+e.message); }
@@ -695,7 +697,7 @@ window.projOpen=(id)=>{
     }).join('')||'<p class="mut">No phases yet — apply SDLC template: Technical Analysis → Coding → SIT → UAT → UAT Sign Off → Go Live → Go Live Sign Off → Hypercare.</p>'}
     <div class="row" style="margin-top:12px;flex-wrap:wrap">${!hasTpl&&!isNonDevelopingSystem(S.systems.find(s=>s.id===p.systemId))?`<button class="btn pri" onclick="applyTemplate('${p.id}')">⊕ Apply SDLC template (8 phases + starter tasks)</button>`:''}<button class="btn" onclick="subForm('${p.id}')">+ Sub-project</button><button class="btn" onclick="projForm('${p.id}')">Edit</button></div>`);
 };
-window.exportProjectReport=(id)=>{ const p=S.projects.find(x=>x.id===id); if(!p) return toast('Project not found'); toast('Preparing executive PPT…'); window.open('/api/projects/'+encodeURIComponent(id)+'/report.pptx','_blank'); };
+window.exportProjectReport=(id)=>{ const p=S.projects.find(x=>x.id===id); if(!p) return toast('Project not found'); toast('Preparing executive PPT…'); window.open(apiUrl('/api/projects/'+encodeURIComponent(id)+'/report.pptx'),'_blank'); };
 window.jumpModalTo=(id)=>{ const modal=$('#modal'),target=document.getElementById(id); if(!modal||!target) return; const top=target.getBoundingClientRect().top-modal.getBoundingClientRect().top+modal.scrollTop-12; modal.scrollTo({top:Math.max(0,top),behavior:'smooth'}); };
 window.changeProjectAssignee=async (pid,val)=>{ const me=myName()||'User'; try{ await api.send('/api/projects/'+pid,'PATCH',{assignee:val,by:me}); toast(me+': project owner → '+val); refresh(); const p=S.projects.find(x=>x.id===pid); if(p) setTimeout(()=>projOpen(pid),300); }catch(e){ toast(e.message); } };
 window.changeProjectStatus=async (pid,val)=>{ const me=myName()||'User'; try{ await api.send('/api/projects/'+pid,'PATCH',{status:val,by:me}); toast(me+': project status → '+val); refresh(); setTimeout(()=>projOpen(pid),300); }catch(e){ toast(e.message); } };
@@ -781,7 +783,7 @@ window.saveSys=async id=>{
   catch(e){ toast(e.message); }
 };
 
-$('#btnExport').onclick=()=>window.open('/api/export','_blank');
+$('#btnExport').onclick=()=>window.open(apiUrl('/api/export'),'_blank');
 $('#btnReset').onclick=async()=>{ if(!await confirmModal('Reset to seed demo data? All current projects will be replaced.',{title:'Reset',ok:'Reset',danger:true}))return; try{ await api.send('/api/reset','POST'); toast('Reset done'); refresh(); }catch(e){ toast(e.message); } };
 $('#fileImport').onchange=async e=>{
   const f=e.target.files[0]; if(!f)return;

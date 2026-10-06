@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node smoke-test.js"
+    "test": "node smoke-test.js",
+    "backup": "node scripts/backup-db.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
