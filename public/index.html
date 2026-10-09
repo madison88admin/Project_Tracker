@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Madison Dev Tracker — Centralized Development Tracker</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%233b82f6'/%3E%3Ctext x='32' y='44' font-family='Arial' font-size='36' font-weight='bold' text-anchor='middle' fill='white'%3EM%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/ScrollTrigger.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/ScrollSmoother.min.js"></script>
+</head>
+<body>
+<div class="island" id="appIsland">
+  <div class="island-logo--cont"><span class="island-logo">M</span></div>
+  <button class="menu-btn" id="menuToggle" aria-expanded="false" aria-controls="menu-overlay" aria-label="Open navigation menu">
+    <div class="button-cont">
+      <svg id="menuIcon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <line class="bar bar-top" x1="2" y1="5" x2="14" y2="5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+        <line class="bar bar-mid" x1="2" y1="8" x2="14" y2="8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+        <line class="bar bar-bot" x1="2" y1="11" x2="14" y2="11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+      </svg>
+    </div>
+  </button>
+</div>
+<div class="menu-overlay" id="menu-overlay" role="dialog" aria-modal="true" aria-label="Navigation menu">
+  <div class="menu-backdrop"></div>
+  <div class="menu-panel">
+    <div class="menu-panel-head"><span class="logo">M</span><div><b>Madison Dev Tracker</b><small>All systems · one board</small></div></div>
+    <nav id="nav">
+      <button data-view="dashboard" class="menu-link active"><span>Dashboard</span><span class="link-num">01</span></button>
+      <button data-view="projects" class="menu-link"><span>Projects</span><span class="link-num">02</span></button>
+      <button data-view="systems" class="menu-link"><span>Systems</span><span class="link-num">03</span></button>
+      <button data-view="activity" class="menu-link"><span>Activity</span><span class="link-num">04</span></button>
+      <button data-view="benefits" class="menu-link"><span>FTE Benefits</span><span class="link-num">05</span></button>
+      <button data-view="calendar" class="menu-link"><span>Project Calendar</span><span class="link-num">06</span></button>
+      <button data-view="portfolioReport" class="menu-link"><span>Portfolio Report</span><span class="link-num">07</span></button>
+    </nav>
+    <div class="menu-tools">
+      <small id="apiHealth" aria-live="polite">connecting…</small>
+      <div class="row"><button id="btnExport" class="ghost">Export</button><button id="btnReset" class="ghost danger">Reset</button></div>
+      <label class="import">Import JSON<input type="file" id="fileImport" accept="application/json" hidden></label>
+    </div>
+  </div>
+</div>
+<div id="smooth-wrapper">
+<div id="smooth-content">
+<div id="app">
+  <main>
+    <header class="topbar">
+      <button class="primary" onclick="projForm()">+ New project</button>
+      <button class="btn quick-nav" onclick="go('dashboard')">Dashboard</button>
+      <button class="btn quick-nav" onclick="goProjects()">Projects</button>
+      <button class="btn quick-open-btn" onclick="quickOpen()" aria-keyshortcuts="Control+K Meta+K" title="Quick open projects and tasks">⌕ Quick open <kbd>Ctrl K</kbd></button>
+      <button class="btn" onclick="syncHQ()">Sync HQ</button>
+      <button class="btn" onclick="pushHQ()">Push HQ</button>
+      <span style="flex:1"></span>
+      <div id="profileBox" style="display:flex;gap:8px;align-items:center"></div>
+    </header>
+    <section id="view"></section>
+  </main>
+</div>
+</div>
+</div>
+
+<div id="modalWrap" class="modal-wrap hidden"><div id="modal" class="modal"></div></div>
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+<script src="runtime-config.js?v=20261006"></script>
+<script src="app.js"></script>
+</body>
+</html>

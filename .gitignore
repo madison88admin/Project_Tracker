@@ -1,0 +1,15 @@
+node_modules/
+data/*.pptx
+data/*backup*.json
+data/db.json
+data/backups/
+data/ppt-export-build*/
+data/ppt-export-output/
+tmp/
+.codex-finalizer/
+.ppt-finalizer/
+*.tmp
+*.log
+.env
+.env.*
+!.env.example
