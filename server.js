@@ -213,12 +213,10 @@ function safeReportName(name) {
 }
 
 function createProjectReport(payload, outputPath) {
-  const generator = path.join(__dirname, '.codex', 'ppt-export-build', 'project-report.mjs');
+  const generator = path.join(__dirname, '.codex', 'ppt-export-build', 'portable-report.mjs');
   const buildDir = path.join(__dirname, 'data', 'ppt-export-build');
-  process.env.SKILL_DIR = process.env.PPT_SKILL_DIR || 'C:\\Users\\JC\\.codex\\plugins\\cache\\openai-primary-runtime\\presentations\\26.921.10847\\skills\\presentations';
-  process.env.RUNTIME_PYTHON = process.env.PPT_RUNTIME_PYTHON || 'C:\\Users\\JC\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe';
   return import(require('url').pathToFileURL(generator).href + `?run=${Date.now()}`)
-    .then(mod => mod.buildProjectReport(payload, { tmpDir: buildDir, finalPptx: outputPath, skipValidation: true }));
+    .then(mod => mod.buildProjectReport(payload, { tmpDir: buildDir, finalPptx: outputPath }));
 }
 
 function portfolioReportData(body = {}) {
@@ -299,12 +297,10 @@ function portfolioReportData(body = {}) {
 }
 
 function createPortfolioReport(payload, outputPath) {
-  const generator = path.join(__dirname, '.codex', 'ppt-export-build', 'portfolio-report.mjs');
+  const generator = path.join(__dirname, '.codex', 'ppt-export-build', 'portable-report.mjs');
   const buildDir = path.join(__dirname, 'data', 'ppt-export-build');
-  process.env.SKILL_DIR = process.env.PPT_SKILL_DIR || 'C:\\Users\\JC\\.codex\\plugins\\cache\\openai-primary-runtime\\presentations\\26.921.10847\\skills\\presentations';
-  process.env.RUNTIME_PYTHON = process.env.PPT_RUNTIME_PYTHON || 'C:\\Users\\JC\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe';
   return import(require('url').pathToFileURL(generator).href + `?run=${Date.now()}`)
-    .then(mod => mod.buildPortfolioReport(payload, { tmpDir: buildDir, finalPptx: outputPath, skipValidation: true }));
+    .then(mod => mod.buildPortfolioReport(payload, { tmpDir: buildDir, finalPptx: outputPath }));
 }
 
 function uid(prefix) {
