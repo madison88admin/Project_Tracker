@@ -689,6 +689,7 @@ app.post('/api/tasks', (req, res) => {
   const n = Math.max(1000, ...db.tasks.map(t => parseInt(String(t.id).replace(/\D/g, '')) || 0)) + 1;
   const t = { id: req.body.id || ('T-' + n), status: 'Pipeline', priority: 'Medium', type: 'Task', progress: 0, labels: [], updates: [], deployments: [], startDate:'', due:'', createdAt: nowISO(), updatedAt: nowISO(), ...req.body, status: mapStatus(req.body.status || 'Pipeline') };
   if (!t.title || !t.systemId) return res.status(400).json({ error: 'title + systemId required' });
+  if (t.subprojectId && req.body.status && !['Pipeline', 'Development', 'Not Started', 'In Progress'].includes(String(req.body.status))) return res.status(400).json({ error: 'subtask status must be Not Started or In Progress' });
   if (!db.systems.some(s => s.id === t.systemId)) return res.status(400).json({ error: 'unknown system' });
   if (t.projectId && !db.projects.some(p => p.id === t.projectId)) return res.status(400).json({ error: 'unknown project' });
   if (!PRIORITIES.includes(t.priority) || !TYPES.includes(t.type)) return res.status(400).json({ error: 'invalid task fields' });
@@ -701,6 +702,8 @@ app.patch('/api/tasks/:id', (req, res) => {
   if (!t) return res.status(404).json({ error: 'not found' });
   const before = t.status;
   const body = { ...(req.body || {}) };
+  const targetSubprojectId = body.subprojectId !== undefined ? body.subprojectId : t.subprojectId;
+  if (targetSubprojectId && body.status && !['Pipeline', 'Development', 'Not Started', 'In Progress'].includes(String(body.status))) return res.status(400).json({ error: 'subtask status must be Not Started or In Progress' });
   if (body.status) body.status = mapStatus(body.status);
   if (body.systemId && !db.systems.some(s => s.id === body.systemId)) return res.status(400).json({ error: 'unknown system' });
   if (body.projectId && !db.projects.some(p => p.id === body.projectId)) return res.status(400).json({ error: 'unknown project' });
