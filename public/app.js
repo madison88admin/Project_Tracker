@@ -17,7 +17,7 @@ const api = {
     return j;
   }
 };
-function authHeaders(){ const t=localStorage.getItem('mdt_token'); return t?{Authorization:'Bearer '+t}:{}; }
+function authHeaders(){ const t=localStorage.getItem('mdt_token'); const h=t?{Authorization:'Bearer '+t}:{}; const profile=localStorage.getItem('mdt_me'); if(profile) h['X-MDT-Profile']=profile; return h; }
 const S = { view:'dashboard', systems:[], tasks:[], projects:[], activity:[], presence:[], stats:null, meta:{statuses:[],priorities:[],types:[]} };
 S.timelineLimit = 8;
 window.loadMoreProjects = () => { S.timelineLimit += 8; render(); };
@@ -33,6 +33,8 @@ changeEvents.onerror = () => {}; // browser automatically reconnects
 const sysName = id => (S.systems.find(s=>s.id===id)||{name:id}).name;
 const isDone = t => t.status==='Live';
 const TEAM = ['John Carlo Manalo', 'Mhark Anthony Pentinio', 'Stephanie Joyce Guce', 'Lester Mendoza', 'Maritoni Joy Sapinoso'];
+const FTE_VIEWER = 'Paul Avendano';
+const PROFILE_USERS = [...TEAM, FTE_VIEWER];
 const DEVELOPER_OVERHEAD = { 'John Carlo Manalo':10, 'Mhark Anthony Pentinio':10, 'Stephanie Joyce Guce':10 };
 const ADMIN = 'John Carlo Manalo';
 const ITSM_URL = 'https://m88itsm.netlify.app/login';
@@ -106,7 +108,7 @@ async function refresh(opts={}){
   try{
     const [meta,systems,tasks,projects,activity,stats] = await Promise.all([
       api.get('/api/meta'),api.get('/api/systems'),api.get('/api/tasks'),
-      api.get('/api/projects'),api.get('/api/activity'),api.get('/api/stats')
+      api.get('/api/projects'),api.get('/api/audit-logs'),api.get('/api/stats')
     ]);
     Object.assign(S,{meta,systems,tasks,projects,activity,stats});
     await updatePresence(presenceContext.systemId,presenceContext.projectId);
@@ -158,14 +160,16 @@ function dueInfo(t){
   return {cls:'due-ok',txt:`${due}`};
 }
 function myName(){ return localStorage.getItem('mdt_me')||''; }
+function canViewFte(){ return myName()===FTE_VIEWER; }
 function setMyName(n){ if(n) localStorage.setItem('mdt_me',n); else localStorage.removeItem('mdt_me'); renderProfile(); }
 function teamOpts(){ return [...new Set([...TEAM,...S.tasks.map(t=>t.assignee).filter(Boolean)])].map(n=>`<option value="${esc(n)}">`).join(''); }
 function renderProfile(){
   const box=document.getElementById('profileBox'); if(!box) return;
   const me=myName();
   const allowed=isProfileChangeAllowed();
+  const fteNav=document.querySelector('#nav [data-view="benefits"]'); if(fteNav) fteNav.style.display=canViewFte()?'':'none';
   if(!me){
-    box.innerHTML=`<span class="mut" style="font-size:12px">👤 Select profile:</span><select id="profileSel" style="width:auto;min-width:160px"><option value="">— choose —</option>${[...new Set([...TEAM,...S.tasks.map(t=>t.assignee).filter(Boolean)])].map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select><button class="btn pri" onclick="const v=document.getElementById('profileSel').value;if(!v)return toast('Pili ka muna ng user');setProfile(v)">Lock</button><a href="${ITSM_URL}" target="_blank" class="mut" style="font-size:11px;margin-left:6px;text-decoration:underline">ITSM Login →</a>${allowed?'': '<span class="pill" style="margin-left:6px;background:#3f1d1d;color:#fca5a5;border-color:#7f1d1d">Locked by admin</span>'}`;
+    box.innerHTML=`<span class="mut" style="font-size:12px">👤 Select profile:</span><select id="profileSel" style="width:auto;min-width:160px"><option value="">— choose —</option>${[...new Set([...PROFILE_USERS,...S.tasks.map(t=>t.assignee).filter(Boolean)])].map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select><button class="btn pri" onclick="const v=document.getElementById('profileSel').value;if(!v)return toast('Pili ka muna ng user');setProfile(v)">Lock</button><a href="${ITSM_URL}" target="_blank" class="mut" style="font-size:11px;margin-left:6px;text-decoration:underline">ITSM Login →</a>${allowed?'': '<span class="pill" style="margin-left:6px;background:#3f1d1d;color:#fca5a5;border-color:#7f1d1d">Locked by admin</span>'}`;
   } else {
     const isAdmin=me===ADMIN;
     box.innerHTML=`<span style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="confirmProfileChange()" title="Click to change">${avatar(me,26)}<b style="font-size:13px">${esc(me)}</b><span class="pill" style="background:#0c2a4d;color:#579dff;border-color:#0052cc">🔒 Locked</span>${isAdmin?'<span class="pill" style="background:#14532d;color:#86efac">Admin</span>':''}${allowed?'<span class="pill" style="background:#14532d;color:#86efac">Allowed</span>':'<span class="pill" style="background:#3f1d1d;color:#fca5a5">Blocked</span>'}</span><button class="btn" onclick="confirmProfileChange()">Change</button><a href="${ITSM_URL}" target="_blank" class="mut" style="font-size:11px;margin-left:4px;text-decoration:underline">ITSM</a>${isAdmin?`<button class="btn" style="margin-left:4px;font-size:11px" onclick="toggleProfilePermission()">${allowed?'🔒 Disable':'🔓 Allow'} change</button>`:''}`;
@@ -285,10 +289,12 @@ function benefitData(p){
 function numberFmt(n,d=1){ return new Intl.NumberFormat('en-PH',{maximumFractionDigits:d}).format(Number(n)||0); }
 function phpFmt(n){ return new Intl.NumberFormat('en-PH',{style:'currency',currency:'PHP',maximumFractionDigits:0}).format(Number(n)||0); }
 function benefitSummaryHTML(p){
+  if(!canViewFte()) return '';
   const x=benefitData(p);
   return `<section class="project-benefit-card"><div class="dashboard-section-head"><div><span class="dashboard-eyebrow">PROJECT BENEFITS</span><h3>FTE capacity and cost impact</h3><p class="mut">This calculation is linked to ${esc(p.name)} and follows the Benefits Calculation Policy.</p></div><button class="btn" onclick="benefitForm('${p.id}')">${x.configured?'Edit calculation':'Set calculation'}</button></div><div class="benefit-metrics"><div><b>${x.configured?numberFmt(x.saved):'—'}</b><span>hours saved each month</span></div><div><b>${x.configured?numberFmt(x.fte,2):'—'}</b><span>FTE capacity released</span></div><div><b>${x.configured?phpFmt(x.costAvoidance):'—'}</b><span>estimated annual cost impact</span></div></div><div class="benefit-formula"><span>Current manual work: ${x.configured?numberFmt(x.baseline):'—'}h/month → Future manual work: ${x.configured?numberFmt(x.future):'—'}h/month</span><span>1 FTE = 160 working hours/month · ${esc(x.b.outcome)}</span></div></section>`;
 }
 function benefitsHTML(){
+  if(!canViewFte()) return '<div class="empty-state"><h2>FTE Benefits</h2><p>Restricted view. Select the Paul Avendano profile to open this separate reporting area.</p></div>';
   const system=S._benefitSystem||'';
   const rows=S.projects.filter(p=>!system||p.systemId===system).map(p=>({p,x:benefitData(p)}));
   const measured=rows.filter(r=>r.x.configured), totalSaved=measured.reduce((n,r)=>n+r.x.saved,0), totalFte=measured.reduce((n,r)=>n+r.x.fte,0), totalCost=measured.reduce((n,r)=>n+r.x.costAvoidance,0);
@@ -311,7 +317,8 @@ window.toggleAllReportProjects=(checked)=>{ S._reportSelected=new Set(checked?re
 window.exportPortfolioReport=async()=>{
   const selected=[...reportSelectedSet()];
   if(!selected.length) return toast('Pili muna ng project para sa report');
-  const include={overview:true,delivery:true,team:true,benefits:true,register:true,...(S._reportInclude||{})};
+  const include={overview:true,delivery:true,team:true,benefits:canViewFte(),register:true,...(S._reportInclude||{})};
+  if(!canViewFte()) include.benefits=false;
   const system=S._reportSystem||'',developer=S._reportDeveloper||'',status=S._reportStatus||'';
   const scope=reportScopeProjects();
   toast('Preparing portfolio executive PPT…');
@@ -322,12 +329,15 @@ window.exportPortfolioReport=async()=>{
   }catch(e){ toast('Portfolio export failed: '+e.message); }
 };
 function portfolioReportHTML(){
-  const visible=reportScopeProjects(),selected=reportSelectedSet(),include={overview:true,delivery:true,team:true,benefits:true,register:true,...(S._reportInclude||{})};
+  const visible=reportScopeProjects(),selected=reportSelectedSet(),include={overview:true,delivery:true,team:true,benefits:canViewFte(),register:true,...(S._reportInclude||{})};
+  if(!canViewFte()) include.benefits=false;
   const developers=[...new Set([...TEAM,...S.projects.map(p=>p.assignee||'Unassigned')])].filter(Boolean).sort();
   const system=S._reportSystem||'',developer=S._reportDeveloper||'',status=S._reportStatus||'';
-  return `<div class="report-shell"><div class="report-heading"><div><span class="dashboard-eyebrow">EXECUTIVE REPORTING</span><h1>Portfolio Report</h1><p>Select the exact project scope and sections to include in the M88 executive PPT.</p></div><div class="report-heading-actions"><span class="report-selection-count"><b>${selected.size}</b> selected · ${visible.length} visible</span><button class="btn pri" onclick="exportPortfolioReport()" ${selected.size?'':'disabled'}>Export portfolio PPT</button></div></div><div class="report-controls card"><div class="report-filter-group"><label>System<select onchange="S._reportSystem=this.value;reportFilterChanged()"><option value="">All development systems</option>${S.systems.filter(s=>!isNonDevelopingSystem(s)).map(s=>`<option value="${esc(s.id)}" ${system===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></label><label>Developer<select onchange="S._reportDeveloper=this.value;reportFilterChanged()"><option value="">All developers</option>${developers.map(u=>`<option value="${esc(u)}" ${developer===u?'selected':''}>${esc(u)}</option>`).join('')}</select></label><label>Status<select onchange="S._reportStatus=this.value;reportFilterChanged()"><option value="">All statuses</option>${['Pipeline','Development','UAT','Live','On Hold'].map(st=>`<option value="${st}" ${status===st?'selected':''}>${st}</option>`).join('')}</select></label></div><div class="report-sections"><span class="report-section-label">Include in PPT</span>${[['overview','Overview'],['delivery','Delivery detail'],['team','Team capacity'],['benefits','FTE benefits'],['register','Project register']].map(([key,label])=>`<label class="report-toggle"><input type="checkbox" ${include[key]?'checked':''} onchange="toggleReportSection('${key}',this.checked)"><span>${label}</span></label>`).join('')}</div></div><div class="report-list-card card"><div class="report-list-head"><div><h2>Projects to report</h2><p class="mut">Only checked projects will appear in the deck.</p></div><div class="row"><button class="btn" onclick="toggleAllReportProjects(true)">Select visible</button><button class="btn" onclick="toggleAllReportProjects(false)">Clear</button></div></div><div class="report-project-list">${visible.map(p=>`<label class="report-project-row"><input class="report-project-check" type="checkbox" ${selected.has(p.id)?'checked':''} onchange="toggleReportProject('${p.id}',this.checked)"><span class="report-project-main"><b>${esc(p.name)}</b><small>${esc(sysName(p.systemId))} · ${esc(p.assignee||'Unassigned')} · ${esc(currentPhase(p))}</small></span><span class="report-project-progress"><b>${Number(p.pct||0)}%</b><i><em style="width:${Math.max(0,Math.min(100,Number(p.pct)||0))}%"></em></i></span><span class="pill" style="background:${statusColor[projectStage(p)]||'#1c2438'};color:#fff;border:0">${esc(projectStage(p))}</span></label>`).join('')||'<div class="empty-state">No projects match these filters.</div>'}</div></div></div>`;
+  const sections=[['overview','Overview'],['delivery','Delivery detail'],['team','Team capacity'],...(canViewFte()?[['benefits','FTE benefits']]:[]),['register','Project register']];
+  return `<div class="report-shell"><div class="report-heading"><div><span class="dashboard-eyebrow">EXECUTIVE REPORTING</span><h1>Portfolio Report</h1><p>Select the exact project scope and sections to include in the M88 executive PPT.</p></div><div class="report-heading-actions"><span class="report-selection-count"><b>${selected.size}</b> selected · ${visible.length} visible</span><button class="btn pri" onclick="exportPortfolioReport()" ${selected.size?'':'disabled'}>Export portfolio PPT</button></div></div><div class="report-controls card"><div class="report-filter-group"><label>System<select onchange="S._reportSystem=this.value;reportFilterChanged()"><option value="">All development systems</option>${S.systems.filter(s=>!isNonDevelopingSystem(s)).map(s=>`<option value="${esc(s.id)}" ${system===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></label><label>Developer<select onchange="S._reportDeveloper=this.value;reportFilterChanged()"><option value="">All developers</option>${developers.map(u=>`<option value="${esc(u)}" ${developer===u?'selected':''}>${esc(u)}</option>`).join('')}</select></label><label>Status<select onchange="S._reportStatus=this.value;reportFilterChanged()"><option value="">All statuses</option>${['Pipeline','Development','UAT','Live','On Hold'].map(st=>`<option value="${st}" ${status===st?'selected':''}>${st}</option>`).join('')}</select></label></div><div class="report-sections"><span class="report-section-label">Include in PPT</span>${sections.map(([key,label])=>`<label class="report-toggle"><input type="checkbox" ${include[key]?'checked':''} onchange="toggleReportSection('${key}',this.checked)"><span>${label}</span></label>`).join('')}</div></div><div class="report-list-card card"><div class="report-list-head"><div><h2>Projects to report</h2><p class="mut">Only checked projects will appear in the deck.</p></div><div class="row"><button class="btn" onclick="toggleAllReportProjects(true)">Select visible</button><button class="btn" onclick="toggleAllReportProjects(false)">Clear</button></div></div><div class="report-project-list">${visible.map(p=>`<label class="report-project-row"><input class="report-project-check" type="checkbox" ${selected.has(p.id)?'checked':''} onchange="toggleReportProject('${p.id}',this.checked)"><span class="report-project-main"><b>${esc(p.name)}</b><small>${esc(sysName(p.systemId))} · ${esc(p.assignee||'Unassigned')} · ${esc(currentPhase(p))}</small></span><span class="report-project-progress"><b>${Number(p.pct||0)}%</b><i><em style="width:${Math.max(0,Math.min(100,Number(p.pct)||0))}%"></em></i></span><span class="pill" style="background:${statusColor[projectStage(p)]||'#1c2438'};color:#fff;border:0">${esc(projectStage(p))}</span></label>`).join('')||'<div class="empty-state">No projects match these filters.</div>'}</div></div></div>`;
 }
 window.benefitForm=(pid)=>{
+  if(!canViewFte()) return toast('FTE Benefits are restricted to Paul Avendano.');
   const p=S.projects.find(x=>x.id===pid); if(!p) return;
   const x=benefitData(p), b=x.b;
   openModal(`<div class="benefit-form-head"><div><span class="dashboard-eyebrow">PROJECT BENEFITS</span><h2>${esc(p.name)}</h2><p class="mut">Enter the current work, expected future work, and cost assumptions. The system will calculate the result automatically.</p></div><span class="pill">Rule: 1 FTE = 160 hours/month</span></div><div class="form-grid benefit-input-grid"><label>Current minutes per transaction<input id="b_current" type="number" min="0" step="0.1" value="${b.currentHandlingMinutes}"><small>How long the work takes today.</small></label><label>Transactions per month<input id="b_volume" type="number" min="0" step="1" value="${b.transactionsPerMonth}"><small>Average monthly volume.</small></label><label>Future minutes per transaction<input id="b_future" type="number" min="0" step="0.1" value="${b.futureHandlingMinutes}"><small>Expected manual time after the change.</small></label><label>Future manual hours per month <small>(optional manual override)</small><input id="b_future_hours" type="number" min="0" step="0.1" value="${b.futureManualHoursPerMonth===null?'':b.futureManualHoursPerMonth}" placeholder="Leave blank to calculate automatically"><small>Use this only when the future work cannot be estimated from minutes × volume.</small></label><label>Manual exception rate (%)<input id="b_exceptions" type="number" min="0" max="100" step="1" value="${b.manualExceptionsPct}"><small>Recorded for business context; it does not change the base FTE formula.</small></label><label>Teams or roles affected<input id="b_roles" value="${esc(b.roles)}" placeholder="e.g. Operations, Finance"></label><label>Hourly cost, fully loaded (PHP)<input id="b_hourly" type="number" min="0" step="1" value="${b.fullyLoadedHourlyCost}"><small>Used as a reference when no annual FTE cost is provided.</small></label><label>Annual cost per FTE (PHP)<input id="b_annual" type="number" min="0" step="1000" value="${b.annualCostPerFte}"><small>Used to estimate the annual financial impact.</small></label><label>Expected benefit type<select id="b_outcome"><option ${b.outcome==='Headcount Reduced (Hard FTE Savings)'?'selected':''}>Headcount Reduced (Hard FTE Savings)</option><option ${b.outcome==='Capacity Released (Soft Savings)'?'selected':''}>Capacity Released (Soft Savings)</option><option ${b.outcome==='Growth Absorbed (Cost Avoidance)'?'selected':''}>Growth Absorbed (Cost Avoidance)</option></select></label><label>Expected error reduction (%)<input id="b_error" type="number" min="0" max="100" step="1" value="${b.errorReductionPct}"></label><label>Expected processing-time reduction (%)<input id="b_cycle" type="number" min="0" max="100" step="1" value="${b.cycleTimeReductionPct}"></label><label>Risk or dependency improvement<input id="b_risk" value="${esc(b.riskReduction)}" placeholder="e.g. less key-person dependency"></label><div class="benefit-live-preview full" id="benefitLivePreview"></div></div><div class="row" style="margin-top:14px"><button class="btn pri" onclick="saveBenefitForm('${p.id}')">Save calculation</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
@@ -340,6 +350,7 @@ window.renderBenefitPreview=()=>{
   el.innerHTML=`<div><span>Current manual</span><b>${numberFmt(baseline)} h/month</b></div><div><span>Future manual</span><b>${numberFmt(future)} h/month</b></div><div><span>Time saved</span><b>${numberFmt(saved)} h/month</b></div><div><span>FTE equivalent</span><b>${numberFmt(fte,2)}</b></div><div><span>Annual impact</span><b>${phpFmt(fte*annual)}</b></div>`;
 };
 window.saveBenefitForm=async pid=>{
+  if(!canViewFte()) return toast('FTE Benefits are restricted to Paul Avendano.');
   const body={currentHandlingMinutes:Number($('#b_current').value)||0,transactionsPerMonth:Number($('#b_volume').value)||0,futureHandlingMinutes:Number($('#b_future').value)||0,futureManualHoursPerMonth:$('#b_future_hours').value===''?null:Number($('#b_future_hours').value)||0,manualExceptionsPct:Number($('#b_exceptions').value)||0,roles:$('#b_roles').value,fullyLoadedHourlyCost:Number($('#b_hourly').value)||0,annualCostPerFte:Number($('#b_annual').value)||0,outcome:$('#b_outcome').value,errorReductionPct:Number($('#b_error').value)||0,cycleTimeReductionPct:Number($('#b_cycle').value)||0,riskReduction:$('#b_risk').value};
   try{ await api.send('/api/projects/'+pid,'PATCH',{benefits:body,by:myName()||'User'}); toast('FTE benefits saved to project'); closeModal(); refresh(); }catch(e){ toast(e.message); }
 };
@@ -438,7 +449,7 @@ function toggleAppMenu(){
   else appMenuTimeline.eventCallback('onReverseComplete',()=>{gsap.set('.menu-overlay',{pointerEvents:'none'});}).timeScale(1).reverse();
 }
 function closeAppMenu(){ if(appMenuOpen) toggleAppMenu(); }
-function go(v){ if(v==='projects' && S._userFilter) S._projectUserFilter=S._userFilter; closeAppMenu(); S.view=v; document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('active',x.dataset.view===v)); render(); }
+function go(v){ if(v==='benefits'&&!canViewFte()){ toast('FTE Benefits are restricted to Paul Avendano.'); return; } if(v==='projects' && S._userFilter) S._projectUserFilter=S._userFilter; closeAppMenu(); S.view=v; document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('active',x.dataset.view===v)); render(); }
 window.toggleCompact=()=>{ const cur=localStorage.getItem('mdt_compact')!=='0'; localStorage.setItem('mdt_compact', cur?'0':'1'); render(); };
 document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>go(b.dataset.view));
 window.goProjects=()=>{ S.stageFilter=null; go('projects'); };
@@ -550,7 +561,7 @@ function dashboardHTML(){
     <div id="presenceBar" class="presence-bar">${presenceHtml()}</div>
     <div class="dashboard-heading">
       <div><span class="dashboard-eyebrow">MADISON DEVELOPMENT OPERATIONS</span><h1>Portfolio overview</h1><p>Track delivery health, active work, ownership, and deadlines from one view.</p></div>
-      <div class="dashboard-heading-actions"><button class="btn" onclick="go('activity')">Activity log</button><button class="btn pri" onclick="go('projects')">Open projects</button></div>
+      <div class="dashboard-heading-actions"><button class="btn" onclick="go('activity')">Audit logs</button><button class="btn pri" onclick="go('projects')">Open projects</button></div>
     </div>
     <div class="dashboard-tabs"><button class="dashboard-tab active">Overview</button><button class="dashboard-tab" onclick="go('projects')">Projects <b>${ps.length}</b></button><button class="dashboard-tab" onclick="go('activity')">Activity <b>${S.activity.length}</b></button></div>
     <div class="dashboard-kpis">
@@ -643,7 +654,7 @@ function render(opts={}){
     const byDay={}; for(const a of S.activity){ const d=new Date(a.at).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}); (byDay[d]=byDay[d]||[]).push(a); }
     v.innerHTML=`
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:12px">
-        <div><h2 style="margin:0;font-size:18px;font-weight:800">Activity</h2><div class="mut">Auto-logged updates across all systems · ${S.activity.length} entries</div></div>
+        <div><h2 style="margin:0;font-size:18px;font-weight:800">Audit Logs</h2><div class="mut">Separate audit trail of changes across all systems · ${S.activity.length} entries</div></div>
         <input placeholder="Filter activity..." oninput="S._actQ=this.value;render()" value="${esc(S._actQ||'')}" style="max-width:280px">
       </div>
       <div class="card" style="padding:0;overflow:hidden">

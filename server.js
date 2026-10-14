@@ -88,6 +88,7 @@ const LEGACY_PHASE_MAP = {
   'live': 'Go Live'
 };
 const FTE_HOURS_PER_MONTH = 160;
+const FTE_VIEWER = 'Paul Avendano';
 const BENEFIT_DEFAULTS = {
   currentHandlingMinutes: 0,
   transactionsPerMonth: 0,
@@ -102,6 +103,13 @@ const BENEFIT_DEFAULTS = {
   cycleTimeReductionPct: 0,
   riskReduction: ''
 };
+
+function requestProfile(req) {
+  return String(req.get('x-mdt-profile') || '').trim();
+}
+function canViewFte(req) {
+  return requestProfile(req) === FTE_VIEWER;
+}
 
 function normalizeBenefits(value) {
   const input = value && typeof value === 'object' ? value : {};
@@ -204,18 +212,19 @@ function orderedProjectSubprojects(projectId){
   const order = new Map(templateForProject(projectId).map((name, index) => [name, index]));
   return (db.subprojects || []).filter(s => s.projectId === projectId).sort((a, b) => (order.get(a.name) ?? 999) - (order.get(b.name) ?? 999));
 }
-function enrichProjects() {
+function enrichProjects(includeBenefits = true) {
   return (db.projects || []).map(p => {
     const ts = db.tasks.filter(t => t.projectId === p.id);
     const byStage = { 'Pipeline': 0, 'Development': 0, 'UAT': 0, 'Live': 0, 'On Hold': 0 };
     for (const t of ts) if (byStage[t.status] !== undefined) byStage[t.status]++;
-    const benefits = normalizeBenefits(p.benefits);
-    return { ...p, benefits, benefitsCalc: calculateBenefits(benefits), ...subStats(ts), byStage, subprojects: orderedProjectSubprojects(p.id).map(s => { const st = ts.filter(t => t.subprojectId === s.id); const stage=subStage(st, s.stage); const stats=subStats(st); return { ...s, ...stats, pct: st.length ? stats.pct : (STATUS_PROGRESS[stage] ?? 0), stage }; }) };
+    const { benefits: storedBenefits, benefitsCalc: _storedBenefitsCalc, ...safeProject } = p;
+    const benefitFields = includeBenefits ? { benefits: normalizeBenefits(storedBenefits), benefitsCalc: calculateBenefits(storedBenefits) } : {};
+    return { ...safeProject, ...benefitFields, ...subStats(ts), byStage, subprojects: orderedProjectSubprojects(p.id).map(s => { const st = ts.filter(t => t.subprojectId === s.id); const stage=subStage(st, s.stage); const stats=subStats(st); return { ...s, ...stats, pct: st.length ? stats.pct : (STATUS_PROGRESS[stage] ?? 0), stage }; }) };
   });
 }
 
-function reportProjectData(projectId) {
-  const project = enrichProjects().find(p => p.id === projectId);
+function reportProjectData(projectId, includeBenefits = true) {
+  const project = enrichProjects(includeBenefits).find(p => p.id === projectId);
   if (!project) return null;
   const system = db.systems.find(s => s.id === project.systemId) || {};
   const tasks = db.tasks.filter(t => t.projectId === project.id);
@@ -249,11 +258,11 @@ function createProjectReport(payload, outputPath) {
     .then(mod => mod.buildProjectReport(payload, { tmpDir: buildDir, finalPptx: outputPath }));
 }
 
-function portfolioReportData(body = {}) {
+function portfolioReportData(body = {}, includeBenefits = true) {
   const requestedIds = new Set(Array.isArray(body.projectIds) ? body.projectIds.map(String) : []);
   const requestedSystems = new Set(Array.isArray(body.systemIds) ? body.systemIds.map(String) : []);
   const requestedStatuses = new Set(Array.isArray(body.statuses) ? body.statuses.map(String) : []);
-  const all = enrichProjects();
+  const all = enrichProjects(includeBenefits);
   const selected = all.filter(p => {
     if (requestedIds.size && !requestedIds.has(String(p.id))) return false;
     if (requestedSystems.size && !requestedSystems.has(String(p.systemId))) return false;
@@ -289,7 +298,7 @@ function portfolioReportData(body = {}) {
       overdueCount: overdue,
       nextTaskDeadline: nextTask?.due || '',
       nextTaskTitle: nextTask?.title || '',
-      benefitsCalc: project.benefitsCalc
+      ...(includeBenefits ? { benefitsCalc: project.benefitsCalc } : {})
     };
   });
   const byStatus = Object.fromEntries(STATUSES.map(status => [status, projects.filter(p => p.status === status).length]));
@@ -308,7 +317,7 @@ function portfolioReportData(body = {}) {
     }, 0));
     workload[name] = { active: mine.length, projects: mine.map(p => p.name), allocation, overhead, manualOverrides: manual.length };
   }
-  const measured = projects.filter(p => p.benefitsCalc?.configured);
+  const measured = includeBenefits ? projects.filter(p => p.benefitsCalc?.configured) : [];
   const benefits = {
     measured: measured.length,
     timeSaved: Math.round(measured.reduce((n, p) => n + (p.benefitsCalc.timeSaved || 0), 0) * 10) / 10,
@@ -318,7 +327,7 @@ function portfolioReportData(body = {}) {
   return {
     generatedAt: nowISO(),
     filters: body.filters || {},
-    include: { overview: true, delivery: true, team: true, benefits: true, register: true, ...(body.include || {}) },
+    include: { overview: true, delivery: true, team: true, benefits: includeBenefits, register: true, ...(body.include || {}), ...(includeBenefits ? {} : { benefits: false }) },
     projects,
     summary: { total: projects.length, live: byStatus.Live || 0, inProgress: (byStatus.Development || 0) + (byStatus.UAT || 0), overdue: projects.reduce((n, p) => n + p.overdueCount, 0), avgCompletion, byStatus },
     workload,
@@ -576,7 +585,7 @@ app.use(cors({
     return callback(null, false);
   },
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Cache-Control', 'Last-Event-ID'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Cache-Control', 'Last-Event-ID', 'X-MDT-Profile'],
   exposedHeaders: ['Content-Disposition'],
   optionsSuccessStatus: 204,
   maxAge: 86400
@@ -758,10 +767,10 @@ function applyTemplateToProject(projectId){
 }
 
 // projects + sub-projects (progress derived, never stored) — project status is manual + auto-derived fallback
-app.get('/api/projects', (req, res) => res.json(enrichProjects()));
+app.get('/api/projects', (req, res) => res.json(enrichProjects(canViewFte(req))));
 app.get('/api/templates', (req, res) => res.json({ template: PROJECT_TEMPLATE, phaseTasks: PROJECT_PHASE_TASKS, adminTemplate: ADMIN_PROJECT_TEMPLATE, adminPhaseTasks: ADMIN_PHASE_TASKS }));
 app.get('/api/projects/:id/report.pptx', async (req, res) => {
-  const payload = reportProjectData(req.params.id);
+  const payload = reportProjectData(req.params.id, canViewFte(req));
   if (!payload) return res.status(404).json({ error: 'project not found' });
   const outputDir = path.join(__dirname, 'data', 'ppt-export-output');
   fs.mkdirSync(outputDir, { recursive: true });
@@ -776,7 +785,7 @@ app.get('/api/projects/:id/report.pptx', async (req, res) => {
   }
 });
 app.post('/api/reports/portfolio.pptx', async (req, res) => {
-  const payload = portfolioReportData(req.body || {});
+  const payload = portfolioReportData(req.body || {}, canViewFte(req));
   const outputDir = path.join(__dirname, 'data', 'ppt-export-output');
   fs.mkdirSync(outputDir, { recursive: true });
   const filename = `portfolio-executive-report-${Date.now()}.pptx`;
@@ -789,15 +798,18 @@ app.post('/api/reports/portfolio.pptx', async (req, res) => {
     res.status(500).json({ error: error.message || 'Portfolio PPT export failed' });
   }
 });
-app.get('/api/benefits', (req, res) => res.json(enrichProjects().map(p => ({
-  projectId: p.id,
-  project: p.name,
-  systemId: p.systemId,
-  assignee: p.assignee || 'Unassigned',
-  status: p.status || 'Pipeline',
-  benefits: p.benefits,
-  calculation: p.benefitsCalc
-}))));
+app.get('/api/benefits', (req, res) => {
+  if (!canViewFte(req)) return res.status(403).json({ error: 'FTE Benefits are restricted to Paul Avendano.' });
+  return res.json(enrichProjects(true).map(p => ({
+    projectId: p.id,
+    project: p.name,
+    systemId: p.systemId,
+    assignee: p.assignee || 'Unassigned',
+    status: p.status || 'Pipeline',
+    benefits: p.benefits,
+    calculation: p.benefitsCalc
+  })));
+});
 app.post('/api/projects', (req, res) => {
   const wantTemplate = !!req.body.applyTemplate;
   const p = { id: uid('PRJ'), description: '', deadline: '', startDate:'', status:'Pipeline', assignee:'Unassigned', benefits: normalizeBenefits(req.body.benefits), createdAt: nowISO(), updatedAt: nowISO(), ...req.body, status: mapStatus(req.body.status||'Pipeline') };
@@ -814,6 +826,7 @@ app.post('/api/projects', (req, res) => {
 app.patch('/api/projects/:id', (req, res) => {
   const p = db.projects.find(x => x.id === req.params.id);
   if (!p) return res.status(404).json({ error: 'not found' });
+  if (req.body.benefits !== undefined && !canViewFte(req)) return res.status(403).json({ error: 'FTE Benefits are restricted to Paul Avendano.' });
   if (req.body.systemId && !db.systems.some(s => s.id === req.body.systemId)) return res.status(400).json({ error: 'unknown system' });
   if (req.body.status && !STATUSES.includes(mapStatus(req.body.status))) return res.status(400).json({ error: 'invalid status' });
   const before=p.status;
@@ -1010,11 +1023,13 @@ app.get('/api/sync/status', (req, res) => {
 });
 
 app.get('/api/activity', (req, res) => res.json(db.activity.slice(0, 100)));
+app.get('/api/audit-logs', (req, res) => res.json(db.activity.slice(0, 100)));
 
 // export / import / reset
 app.get('/api/export', (req, res) => {
+  const exported = canViewFte(req) ? db : { ...db, projects: (db.projects || []).map(({ benefits, benefitsCalc, ...p }) => p) };
   res.setHeader('Content-Disposition', 'attachment; filename=madison-tracker-export.json');
-  res.json(db);
+  res.json(exported);
 });
 app.post('/api/import', (req, res) => {
   if (!req.body.tasks || !req.body.systems) return res.status(400).json({ error: 'invalid file' });

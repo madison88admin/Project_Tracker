@@ -1,7 +1,7 @@
 /* Smoke test for Madison Dev Tracker v1.2 (open, 3-stage flow). Run: node smoke-test.js (server must be running) */
 const BASE = 'http://localhost:3100';
 async function req(p, opt = {}) {
-  const r = await fetch(BASE + p, { headers: { 'Content-Type': 'application/json' }, ...opt });
+  const r = await fetch(BASE + p, { ...opt, headers: { 'Content-Type': 'application/json', ...(opt.headers || {}) } });
   let j = null; try { j = await r.json(); } catch (e) { /* non-json */ }
   return { status: r.status, body: j };
 }
@@ -33,15 +33,21 @@ const assert = (c, m) => { if (!c) { console.error('FAIL:', m); process.exitCode
   r = await req('/api/projects');
   assert(r.status === 200 && r.body.length >= 12 && r.body.every(p => typeof p.pct === 'number' && p.byStage), 'projects derived with progress + stages');
   const prj = r.body.find(p => p.total > 0) || r.body[0];
-  assert(prj.benefits && prj.benefitsCalc && prj.benefitsCalc.fteHoursPerMonth === 160, 'projects expose policy-based benefits calculation');
-  r = await req('/api/projects/' + prj.id, { method: 'PATCH', body: JSON.stringify({ benefits: { currentHandlingMinutes: 12, transactionsPerMonth: 3000, futureHandlingMinutes: 2, futureManualHoursPerMonth: 100, annualCostPerFte: 900000 } }) });
+  assert(!prj.benefits && !prj.benefitsCalc, 'projects hide FTE benefits from normal profiles');
+  r = await req('/api/benefits');
+  assert(r.status === 403, 'FTE benefits blocked for normal profiles');
+  const fteHeaders = { 'X-MDT-Profile': 'Paul Avendano' };
+  r = await req('/api/projects', { headers: fteHeaders });
+  const fteProject = r.body.find(p => p.id === prj.id);
+  assert(fteProject.benefits && fteProject.benefitsCalc && fteProject.benefitsCalc.fteHoursPerMonth === 160, 'Paul can view policy-based benefits calculation');
+  r = await req('/api/projects/' + prj.id, { method: 'PATCH', headers: fteHeaders, body: JSON.stringify({ benefits: { currentHandlingMinutes: 12, transactionsPerMonth: 3000, futureHandlingMinutes: 2, futureManualHoursPerMonth: 100, annualCostPerFte: 900000 } }) });
   assert(r.status === 200, 'save project benefits baseline');
-  r = await req('/api/projects');
+  r = await req('/api/projects', { headers: fteHeaders });
   const calc = r.body.find(p => p.id === prj.id).benefitsCalc;
   assert(calc.timeSaved === 500 && calc.fteEquivalent === 3.13 && calc.costAvoidance === 2812500, 'benefits math: 600 baseline - 100 future = 500 hours');
-  r = await req('/api/benefits');
+  r = await req('/api/benefits', { headers: fteHeaders });
   assert(r.status === 200 && r.body.some(x => x.projectId === prj.id && x.calculation.timeSaved === 500), 'benefits endpoint links calculation to project');
-  await req('/api/projects/' + prj.id, { method: 'PATCH', body: JSON.stringify({ benefits: {} }) });
+  await req('/api/projects/' + prj.id, { method: 'PATCH', headers: fteHeaders, body: JSON.stringify({ benefits: {} }) });
   r = await req('/api/subprojects', { method: 'POST', body: JSON.stringify({ projectId: prj.id, name: 'Smoke sub' }) });
   assert(r.status === 201, 'create sub-project');
   const sid = r.body.id;

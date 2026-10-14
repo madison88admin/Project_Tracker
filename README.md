@@ -63,6 +63,7 @@ The VPS should expose the API through HTTPS (Nginx/Caddy + a TLS certificate). T
 - **Dates:** Each project and phase can have a start date and target end date. Extending a saved date requires a short reason, and the previous date is kept in the change history.
 - **Developer availability:** Active projects are allocated automatically across the available 100%. John Carlo, Mhark, and Stephanie have a built-in 10% operational-support / BAU allowance. A project percentage can be manually overridden. Live and On Hold projects are excluded.
 - **FTE benefits:** Current manual hours are compared with expected future manual hours. `Hours saved ÷ 160 = FTE capacity released`; the result is an estimate of available team capacity, not an automatic headcount reduction.
+- **FTE access:** FTE Benefits is a separate reporting area visible only when the active profile is `Paul Avendano`. Non-Paul project payloads, exports, and benefit updates are blocked server-side. The Activity view is presented separately as Audit Logs.
 - **Non-development systems:** `IT Operations & System Administration` projects use `New Request → Assessment & Approval → In Progress → Validation → Completed`. `On Hold` is used when work is waiting or blocked. They do not receive the development SDLC template.
 
 Smoke test: `node smoke-test.js` (server must be running).
