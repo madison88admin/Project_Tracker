@@ -73,7 +73,7 @@ For production, PostgreSQL is the source of truth. `data/db.json` is retained as
 ## Functions (deep-dive design)
 1. **Systems Registry** — lahat ng Madison systems (owner, tech, repo, dev/staging/prod URLs, health).
 2. **Projects + Sub-projects** — title, description, dates per project/phase; **% auto-computed from tasks** (never stored); SDLC stage bars; click project = filtered board.
-  **HQ sync** — "Sync HQ" button pulls live projects + progress from `m88-it-headquarters.netlify.app` (Supabase) into the **Developers** group; HQ % shows as badge next to our ticket-derived %. Re-run anytime, idempotent (no duplicates).
+  **HQ push** — "Push HQ" sends local-only projects to the HQ site's Supabase. The frontend uses a push-only workflow; HQ pull/sync is no longer exposed in the interface.
 2. **Tickets** — Feature/Bug/Hotfix/Incident/Task/Docs + Critical→Low, estimate pts, % progress, due, labels.
 3. **5-status flow** — Pipeline → Development → UAT → Live, with On Hold as a separate pause status. **Color per system** plus **due highlights** (⚠ overdue red, ⏰ due soon amber).
 4. **Dashboard + Projects + Systems + Activity** — project-centric views; sub-tasks edited inside project detail.
