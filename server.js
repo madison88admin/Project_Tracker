@@ -89,6 +89,12 @@ const LEGACY_PHASE_MAP = {
 };
 const FTE_HOURS_PER_MONTH = 160;
 const FTE_VIEWER = 'Paul Avendano';
+const BENEFIT_OUTCOMES = ['Soft Savings', 'Cost Avoidance', 'Hard FTE Savings'];
+const BENEFIT_OUTCOME_ALIASES = {
+  'Capacity Released (Soft Savings)': 'Soft Savings',
+  'Growth Absorbed (Cost Avoidance)': 'Cost Avoidance',
+  'Headcount Reduced (Hard FTE Savings)': 'Hard FTE Savings'
+};
 const BENEFIT_DEFAULTS = {
   currentHandlingMinutes: 0,
   transactionsPerMonth: 0,
@@ -98,7 +104,7 @@ const BENEFIT_DEFAULTS = {
   roles: '',
   fullyLoadedHourlyCost: 450,
   annualCostPerFte: 900000,
-  outcome: 'Capacity Released (Soft Savings)',
+  outcome: 'Soft Savings',
   errorReductionPct: 0,
   cycleTimeReductionPct: 0,
   riskReduction: ''
@@ -129,7 +135,8 @@ function normalizeBenefits(value) {
   }
   out.roles = String(out.roles || '').slice(0, 160);
   out.riskReduction = String(out.riskReduction || '').slice(0, 240);
-  out.outcome = String(out.outcome || BENEFIT_DEFAULTS.outcome).slice(0, 80);
+  const rawOutcome = String(out.outcome || BENEFIT_DEFAULTS.outcome).trim();
+  out.outcome = BENEFIT_OUTCOME_ALIASES[rawOutcome] || (BENEFIT_OUTCOMES.includes(rawOutcome) ? rawOutcome : BENEFIT_DEFAULTS.outcome);
   return out;
 }
 
