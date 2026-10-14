@@ -566,6 +566,7 @@ function dashboardHTML(){
     <div class="dashboard-tabs"><button class="dashboard-tab active">Overview</button><button class="dashboard-tab" onclick="go('projects')">Projects <b>${ps.length}</b></button><button class="dashboard-tab" onclick="go('activity')">Activity <b>${S.activity.length}</b></button></div>
     <div class="dashboard-kpis">
       <button class="dashboard-kpi" onclick="filterStage('')"><span>Tracked projects</span><strong>${ps.length}</strong><small>${counts.Live} live · ${active.length} in progress</small></button>
+      <button class="dashboard-kpi" onclick="filterStage('Pipeline')"><span>Pipeline</span><strong>${counts.Pipeline}</strong><small>${ps.length?Math.round(counts.Pipeline/ps.length*100):0}% of portfolio · not started</small></button>
       <button class="dashboard-kpi" onclick="filterStage('Development')"><span>Work in progress</span><strong>${counts.Development+counts.UAT}</strong><small>${counts.Development} development · ${counts.UAT} UAT</small></button>
       <button class="dashboard-kpi" onclick="filterStage('Live')"><span>Live projects</span><strong>${counts.Live}</strong><small>${ps.length?Math.round(counts.Live/ps.length*100):0}% of portfolio</small></button>
       <button class="dashboard-kpi ${overdue.length?'warning':''}" onclick="go('projects')"><span>Needs attention</span><strong>${overdue.length}</strong><small>${onTime===null?'No dated projects':`${onTime}% deadline coverage`}</small></button>
