@@ -47,6 +47,7 @@ const DB_FILE = path.join(DB_DIR, 'db.json');
 const eventClients = new Set();
 
 const STATUSES = ['Pipeline', 'Development', 'UAT', 'Live', 'On Hold'];
+const PHASE_PROGRESS_STATUSES = ['Not Started', 'In Progress', 'Done'];
 const DEVELOPER_OVERHEAD = { 'John Carlo Manalo': 10, 'Mhark Anthony Pentinio': 10, 'Stephanie Joyce Guce': 10 };
 const PRIORITIES = ['Critical', 'High', 'Medium', 'Low'];
 const TYPES = ['Feature', 'Bug', 'Hotfix', 'Improvement', 'Task', 'Incident', 'Docs', 'Change Request'];
@@ -890,13 +891,17 @@ app.post('/api/subprojects', (req, res) => {
   const s = { id: uid('SUB'), description: '', deadline: '', createdAt: nowISO(), updatedAt: nowISO(), ...req.body };
   if (!s.name || !s.projectId) return res.status(400).json({ error: 'name + projectId required' });
   if (!db.projects.some(p => p.id === s.projectId)) return res.status(400).json({ error: 'unknown project' });
+  if (s.phaseStatus && !PHASE_PROGRESS_STATUSES.includes(String(s.phaseStatus))) return res.status(400).json({ error: 'phase status must be Not Started, In Progress, or Done' });
+  s.phaseStatus = s.phaseStatus || 'Not Started';
   db.subprojects.push(s); log(db, req.body.by || 'User', `Sub-project created: ${s.name}`); saveDB(db);
   res.status(201).json(s);
 });
 app.patch('/api/subprojects/:id', (req, res) => {
   const s = db.subprojects.find(x => x.id === req.params.id);
   if (!s) return res.status(404).json({ error: 'not found' });
+  if (req.body.phaseStatus && !PHASE_PROGRESS_STATUSES.includes(String(req.body.phaseStatus))) return res.status(400).json({ error: 'phase status must be Not Started, In Progress, or Done' });
   Object.assign(s, req.body);
+  s.phaseStatus = s.phaseStatus || 'Not Started';
   saveDB(db); res.json(s);
 });
 app.delete('/api/subprojects/:id', (req, res) => {
