@@ -64,7 +64,7 @@ The VPS should expose the API through HTTPS (Nginx/Caddy + a TLS certificate). T
 - **Developer availability:** Active projects are allocated automatically across the available 100%. John Carlo, Mhark, and Stephanie have a built-in 10% operational-support / BAU allowance. A project percentage can be manually overridden. Live and On Hold projects are excluded.
 - **FTE benefits:** Current manual hours are compared with expected future manual hours. `Hours saved ÷ 160 = FTE capacity released`; the result is an estimate of available team capacity, not an automatic headcount reduction.
 - **FTE access:** FTE Benefits is a separate reporting area visible only when the active profile is `Paul Avendano`. Non-Paul project payloads, exports, and benefit updates are blocked server-side. The Activity view is presented separately as Audit Logs.
-- **Non-development systems:** `IT Operations & System Administration` projects use `New Request → Assessment & Approval → In Progress → Validation → Completed`. `On Hold` is used when work is waiting or blocked. They do not receive the development SDLC template.
+- **Non-development systems:** `Infrastructure & System Administration` projects use `New Request → Assessment & Approval → In Progress → Validation → Completed`. `On Hold` is used when work is waiting or blocked. They do not receive the development SDLC template.
 
 Smoke test: `node smoke-test.js` (server must be running).
 
@@ -73,7 +73,7 @@ For production, PostgreSQL is the source of truth. `data/db.json` is retained as
 ## Functions (deep-dive design)
 1. **Systems Registry** — lahat ng Madison systems (owner, tech, repo, dev/staging/prod URLs, health).
 2. **Projects + Sub-projects** — title, description, dates per project/phase; **% auto-computed from tasks** (never stored); SDLC stage bars; click project = filtered board.
-   **HQ sync** — "Sync HQ" button pulls live projects + progress from `m88-it-headquarters.netlify.app` (Supabase) into a "M88 HQ Systems" group; HQ % shows as badge next to our ticket-derived %. Re-run anytime, idempotent (no duplicates).
+  **HQ sync** — "Sync HQ" button pulls live projects + progress from `m88-it-headquarters.netlify.app` (Supabase) into the **Developers** group; HQ % shows as badge next to our ticket-derived %. Re-run anytime, idempotent (no duplicates).
 2. **Tickets** — Feature/Bug/Hotfix/Incident/Task/Docs + Critical→Low, estimate pts, % progress, due, labels.
 3. **5-status flow** — Pipeline → Development → UAT → Live, with On Hold as a separate pause status. **Color per system** plus **due highlights** (⚠ overdue red, ⏰ due soon amber).
 4. **Dashboard + Projects + Systems + Activity** — project-centric views; sub-tasks edited inside project detail.

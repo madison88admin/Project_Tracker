@@ -507,7 +507,7 @@ function ensureProjectTemplates() {
 
 let db = loadDB();
 if (!(db.systems || []).some(s => s.id === 'SYS-ADMIN')) {
-  db.systems.push({ id:'SYS-ADMIN', name:'IT Operations & System Administration', owner:'IT', color:'#8b5cf6', tech:'Administration', repo:'', envDev:'', envStaging:'', envProd:'', health:'On Track', category:'Non-developing', updatedAt:nowISO() });
+  db.systems.push({ id:'SYS-ADMIN', name:'Infrastructure & System Administration', owner:'IT', color:'#8b5cf6', tech:'Infrastructure & Administration', repo:'', envDev:'', envStaging:'', envProd:'', health:'On Track', category:'Non-developing', updatedAt:nowISO() });
   saveDB(db);
 }
 // Remove the retired BRD phase from existing projects while preserving its tasks and activity history.
@@ -522,8 +522,8 @@ const DEFAULT_COLORS = { 'SYS-HRIS': '#3b82f6', 'SYS-INV': '#f59e0b', 'SYS-POS':
 let migrated = false;
 if (!db.projects) { db.projects = deriveProjects(db.tasks || []); db.subprojects = db.subprojects || []; migrated = true; }
 const adminSystem = (db.systems || []).find(s => s.id === 'SYS-ADMIN');
-if (adminSystem && adminSystem.name !== 'IT Operations & System Administration') {
-  adminSystem.name = 'IT Operations & System Administration';
+if (adminSystem && adminSystem.name !== 'Infrastructure & System Administration') {
+  adminSystem.name = 'Infrastructure & System Administration';
   adminSystem.updatedAt = nowISO();
   migrated = true;
 }
@@ -567,8 +567,8 @@ async function initializeTrackerStore() {
     db = remoteState;
     db.systems = db.systems || [];
     const adminSystem = db.systems.find(s => s.id === 'SYS-ADMIN');
-    if (adminSystem && adminSystem.name !== 'IT Operations & System Administration') {
-      adminSystem.name = 'IT Operations & System Administration';
+    if (adminSystem && adminSystem.name !== 'Infrastructure & System Administration') {
+      adminSystem.name = 'Infrastructure & System Administration';
       adminSystem.updatedAt = nowISO();
       remoteMigrated = true;
     }
@@ -968,7 +968,7 @@ app.post('/api/sync/hq', async (req, res) => {
     const list = await fetchHQProjects();
     let sys = db.systems.find(s => s.id === 'SYS-HQ');
     if (!sys) {
-      sys = { id: 'SYS-HQ', name: 'M88 HQ Systems', owner: 'IT', color: '#14b8a6', tech: 'Various', repo: '', envDev: '', envStaging: '', envProd: 'https://m88-it-headquarters.netlify.app', health: 'On Track', updatedAt: nowISO() };
+      sys = { id: 'SYS-HQ', name: 'Developers', owner: 'IT', color: '#14b8a6', tech: 'Various', repo: '', envDev: '', envStaging: '', envProd: 'https://m88-it-headquarters.netlify.app', health: 'On Track', updatedAt: nowISO() };
       db.systems.push(sys);
     }
     let created = 0, updated = 0;
