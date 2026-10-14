@@ -3,6 +3,27 @@
 Isang centralized development tracker para sa **lahat ng systems ni Madison** — hindi per-team spreadsheet, hindi generic PM tool.
 Dev-focused project management: System → Project → Ticket, na may branch/PR/environment/deploy tracking.
 
+## Storage
+
+The tracker keeps `data/db.json` as a local rollback copy. In production, set
+`TRACKER_DATABASE_URL` to a PostgreSQL connection string. On startup the API
+creates `project_tracker.tracker_state`, imports the JSON state on first use, and then
+uses PostgreSQL as the source of truth. Every write is also mirrored to the
+local JSON file for recovery.
+
+Required production variables:
+
+```ini
+TRACKER_DATABASE_URL=postgresql://tracker_user:password@host:5432/tracker
+TRACKER_DATABASE_SSL=require
+TRACKER_DATABASE_SCHEMA=project_tracker
+TRACKER_DATABASE_TABLE=tracker_state
+```
+
+If the database is unavailable, the configured production process exits instead
+of silently falling back to stale data. Without `TRACKER_DATABASE_URL`, local
+development continues to use the JSON file.
+
 ## Bakit ito (vs market) — benchmark summary
 | Tool | Problema para sa Madison |
 |---|---|
@@ -33,18 +54,27 @@ The Netlify site publishes `public/` only. The Node/Express API stays on the VPS
 
 The VPS should expose the API through HTTPS (Nginx/Caddy + a TLS certificate). The frontend uses the same configured API base for normal requests, PPT exports, JSON export, and SSE realtime updates.
 
-## 3-stage flow (v1.2)
-**Pipeline → In Development → Completed.** Drag-drop lang sa Kanban, auto-log sa updates + activity.
+## Business rules in simple terms
+
+- **Project status:** A project moves through `Pipeline → Development → UAT → Live`. `On Hold` is a separate pause status and is not counted as active delivery.
+- **Standard delivery phases:** Development projects use `Technical Analysis → Technical Design → Coding Development → System Internal Testing (SIT) → UAT → Go Live → Hypercare`.
+- **Phase completion:** Project progress is calculated from its tasks. A phase is complete when its tasks are marked `Live`; users do not need to type a percentage for the phase.
+- **After Hypercare:** Any new work requested after Hypercare is recorded as a `Change Request` instead of adding it to the original delivery flow.
+- **Dates:** Each project and phase can have a start date and target end date. Extending a saved date requires a short reason, and the previous date is kept in the change history.
+- **Developer availability:** Active projects are allocated automatically across the available 100%. John Carlo, Mhark, and Stephanie have a built-in 10% operational-support / BAU allowance. A project percentage can be manually overridden. Live and On Hold projects are excluded.
+- **FTE benefits:** Current manual hours are compared with expected future manual hours. `Hours saved ÷ 160 = FTE capacity released`; the result is an estimate of available team capacity, not an automatic headcount reduction.
+- **Non-development systems:** `IT Operations & System Administration` projects use `New Request → Assessment & Approval → In Progress → Validation → Completed`. `On Hold` is used when work is waiting or blocked. They do not receive the development SDLC template.
+
 Smoke test: `node smoke-test.js` (server must be running).
 
-Walang build step, walang DB setup. Data nasa `data/db.json` (HQ sync ang nagpopondo ng projects + tickets).
+For production, PostgreSQL is the source of truth. `data/db.json` is retained as a local rollback copy only.
 
 ## Functions (deep-dive design)
 1. **Systems Registry** — lahat ng Madison systems (owner, tech, repo, dev/staging/prod URLs, health).
-2. **Projects + Sub-projects** — title, description, deadline per project/sub; **% auto-computed from tickets** (never stored); SDLC stage bars (pipeline → in dev → completed); click project = filtered board.
+2. **Projects + Sub-projects** — title, description, dates per project/phase; **% auto-computed from tasks** (never stored); SDLC stage bars; click project = filtered board.
    **HQ sync** — "Sync HQ" button pulls live projects + progress from `m88-it-headquarters.netlify.app` (Supabase) into a "M88 HQ Systems" group; HQ % shows as badge next to our ticket-derived %. Re-run anytime, idempotent (no duplicates).
 2. **Tickets** — Feature/Bug/Hotfix/Incident/Task/Docs + Critical→Low, estimate pts, % progress, due, labels.
-3. **3-stage flow** — Pipeline → In Development → Completed. Walang jargon, drag-drop lang. **Color per system** (HRIS blue, Inventory amber, POS green, CRM purple, Web pink — editable) + **due highlights** (⚠ overdue pula, ⏰ due soon amber).
+3. **5-status flow** — Pipeline → Development → UAT → Live, with On Hold as a separate pause status. **Color per system** plus **due highlights** (⚠ overdue red, ⏰ due soon amber).
 4. **Dashboard + Projects + Systems + Activity** — project-centric views; sub-tasks edited inside project detail.
 5. **Updating feed** — standup-style updates per ticket + global activity audit trail.
 6. **Deployments** — env (Dev/Staging/UAT/Prod) + version + notes per ticket; pag Prod, auto-Completed.

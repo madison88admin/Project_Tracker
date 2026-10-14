@@ -1,5 +1,6 @@
 /* Madison Centralized Development Tracker - API server (v1.2: open access, 3-stage flow)
- * Zero-config: Node + Express + JSON file DB (migratable to SQLite/Supabase later).
+ * Node + Express with PostgreSQL production storage and JSON rollback storage.
+ * Without TRACKER_DATABASE_URL, local development remains zero-config with JSON.
  * Run: npm install ; npm start  -> http://localhost:3100
  * Flow: Pipeline -> In Development -> Completed (simple, no login)
  */
@@ -7,6 +8,7 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const { createPostgresStore } = require('./storage/postgres.cjs');
 
 function loadEnvFile(file) {
   if (!fs.existsSync(file)) return;
@@ -24,6 +26,14 @@ loadEnvFile(path.join(__dirname, '.env'));
 
 const PORT = process.env.PORT || 3100;
 const AUTH_TOKEN = process.env.MDT_AUTH_TOKEN || '';
+const trackerStore = createPostgresStore({
+  connectionString: process.env.TRACKER_DATABASE_URL || process.env.DATABASE_URL,
+  ssl: process.env.TRACKER_DATABASE_SSL || 'require',
+  schema: process.env.TRACKER_DATABASE_SCHEMA || 'project_tracker',
+  table: process.env.TRACKER_DATABASE_TABLE || 'tracker_state'
+});
+let trackerStoreReady = false;
+let trackerReadyPromise = Promise.resolve();
 const normalizeOrigin = value => String(value || '').trim().replace(/\/$/, '').toLowerCase();
 const configuredCorsOrigins = String(process.env.MDT_CORS_ORIGINS || '').split(',').map(normalizeOrigin).filter(Boolean);
 const CORS_ORIGINS = new Set([
@@ -37,7 +47,7 @@ const DB_FILE = path.join(DB_DIR, 'db.json');
 const eventClients = new Set();
 
 const STATUSES = ['Pipeline', 'Development', 'UAT', 'Live', 'On Hold'];
-const DEVELOPER_OVERHEAD = { 'John Carlo Manalo': 5, 'Mhark Anthony Pentinio': 5, 'Stephanie Joyce Guce': 5 };
+const DEVELOPER_OVERHEAD = { 'John Carlo Manalo': 10, 'Mhark Anthony Pentinio': 10, 'Stephanie Joyce Guce': 10 };
 const PRIORITIES = ['Critical', 'High', 'Medium', 'Low'];
 const TYPES = ['Feature', 'Bug', 'Hotfix', 'Improvement', 'Task', 'Incident', 'Docs', 'Change Request'];
 const ENVS = ['Dev', 'Staging', 'UAT', 'Prod'];
@@ -50,6 +60,14 @@ const PROJECT_PHASE_TASKS = {
   ,'UAT': ['UAT Sign-off']
   ,'Go Live': ['Go Live Sign-off']
   ,'Hypercare': []
+};
+const ADMIN_PROJECT_TEMPLATE = ['New Request','Assessment & Approval','In Progress','Validation','Completed'];
+const ADMIN_PHASE_TASKS = {
+  'New Request': ['Log request','Confirm request scope and owner'],
+  'Assessment & Approval': ['Assess impact and risk','Obtain required approval'],
+  'In Progress': ['Execute admin request or maintenance'],
+  'Validation': ['Validate result with requester or IT'],
+  'Completed': ['Document outcome and close request']
 };
 const LEGACY_PHASE_MAP = {
   'data gathering': 'Technical Analysis',
@@ -143,6 +161,17 @@ const STATUS_MAP = {
   'On Hold': 'On Hold', 'On hold': 'On Hold', 'Hold': 'On Hold'
 };
 const mapStatus = s => STATUS_MAP[s] || 'Pipeline';
+function isNonDevelopingSystem(system) { return !!system && (system.category === 'Non-developing' || system.id === 'SYS-ADMIN'); }
+function templateForProject(projectOrId) {
+  const project = typeof projectOrId === 'string' ? (db.projects || []).find(p => p.id === projectOrId) : projectOrId;
+  const system = project ? (db.systems || []).find(s => s.id === project.systemId) : null;
+  return isNonDevelopingSystem(system) ? ADMIN_PROJECT_TEMPLATE : PROJECT_TEMPLATE;
+}
+function phaseTasksForProject(projectOrId) {
+  const project = typeof projectOrId === 'string' ? (db.projects || []).find(p => p.id === projectOrId) : projectOrId;
+  const system = project ? (db.systems || []).find(s => s.id === project.systemId) : null;
+  return isNonDevelopingSystem(system) ? ADMIN_PHASE_TASKS : PROJECT_PHASE_TASKS;
+}
 // projects derive from legacy free-text grouping; progress always computed from tickets, never stored
 function deriveProjects(tasks) {
   const seen = {}, out = [];
@@ -172,7 +201,7 @@ function subStage(list, fallback){
   return 'Pipeline';
 }
 function orderedProjectSubprojects(projectId){
-  const order = new Map(PROJECT_TEMPLATE.map((name, index) => [name, index]));
+  const order = new Map(templateForProject(projectId).map((name, index) => [name, index]));
   return (db.subprojects || []).filter(s => s.projectId === projectId).sort((a, b) => (order.get(a.name) ?? 999) - (order.get(b.name) ?? 999));
 }
 function enrichProjects() {
@@ -198,8 +227,9 @@ function reportProjectData(projectId) {
     : project.status === 'Live'
       ? 'Live'
       : ((project.subprojects || []).find(s => s.stage === project.status) || {}).name || project.status;
-  const currentIndex = PROJECT_TEMPLATE.indexOf(currentStage);
-  const nextPhase = currentIndex >= 0 && currentIndex < PROJECT_TEMPLATE.length - 1 ? PROJECT_TEMPLATE[currentIndex + 1] : '';
+  const projectTemplate = templateForProject(project);
+  const currentIndex = projectTemplate.indexOf(currentStage);
+  const nextPhase = currentIndex >= 0 && currentIndex < projectTemplate.length - 1 ? projectTemplate[currentIndex + 1] : '';
   const hypercare = (project.subprojects || []).find(s => s.name === 'Hypercare');
   return {
     project: { ...project, currentPhase: currentStage, nextPhase, overdueCount, nextTaskDeadline: nextTask?.due || '', nextTaskTitle: nextTask?.title || '', hypercareOpen: !!hypercare && hypercare.stage !== 'Live', blockedReason: project.blockedReason || '' },
@@ -355,11 +385,17 @@ function loadDB() {
     return seed;
   }
 }
-function saveDB(db) {
+function writeLocalDB(db) {
   db.meta.updatedAt = nowISO();
   const tmp = DB_FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
   fs.renameSync(tmp, DB_FILE);
+}
+function saveDB(db) {
+  writeLocalDB(db);
+  if (trackerStore && trackerStoreReady) {
+    trackerStore.save(db).catch(error => console.error('[tracker-db] save failed:', error.message));
+  }
   broadcastChange('data');
 }
 function broadcastChange(type='data') { const msg=`data: ${JSON.stringify({type,at:nowISO()})}\n\n`; for (const res of eventClients) { try { res.write(msg); } catch (e) { eventClients.delete(res); } } }
@@ -373,7 +409,26 @@ function ensureProjectTemplates() {
   db.subprojects = db.subprojects || [];
   for (const p of (db.projects || [])) {
     const system = (db.systems || []).find(s => s.id === p.systemId);
-    if (p.systemId === 'SYS-ADMIN' || system?.category === 'Non-developing') continue;
+    if (isNonDevelopingSystem(system)) {
+      const existing = new Set((db.subprojects || []).filter(s => s.projectId === p.id).map(s => String(s.name || '').trim().toLowerCase()));
+      for (const name of ADMIN_PROJECT_TEMPLATE) {
+        if (existing.has(name.toLowerCase())) continue;
+        db.subprojects.push({ id: uid('SUB'), projectId: p.id, name, description:'', deadline:'', startDate:'', stage:'', createdAt: nowISO(), updatedAt: nowISO() });
+        existing.add(name.toLowerCase());
+        created++;
+      }
+      for (const [phaseName, taskTitles] of Object.entries(ADMIN_PHASE_TASKS)) {
+        const phase = (db.subprojects || []).find(s => s.projectId === p.id && s.name === phaseName);
+        if (!phase) continue;
+        for (const title of taskTitles) {
+          const exists = (db.tasks || []).some(t => t.projectId === p.id && t.subprojectId === phase.id && String(t.title || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '') === title.toLowerCase().replace(/[^a-z0-9]+/g, ''));
+          if (exists) continue;
+          db.tasks.push({ id: uid('T'), title, systemId: p.systemId, project: p.name, projectId: p.id, subprojectId: phase.id, type:'Task', priority:'Medium', status:'Pipeline', assignee:p.assignee || 'Unassigned', reporter:'Admin Workflow Template', due:'', startDate:'', branch:'', pr:'', estimate:1, progress:0, labels:['admin-template'], description:'', updates:[], deployments:[], createdAt:nowISO(), updatedAt:nowISO() });
+          created++;
+        }
+      }
+      continue;
+    }
     const projectSubs = (db.subprojects || []).filter(s => s.projectId === p.id);
     for (const s of [...projectSubs]) {
       const legacy = LEGACY_PHASE_MAP[String(s.name || '').trim().toLowerCase()];
@@ -427,17 +482,16 @@ function ensureProjectTemplates() {
       }
     }
   }
-  const phaseOrder = new Map(PROJECT_TEMPLATE.map((name, index) => [name, index]));
   const projectOrder = new Map((db.projects || []).map((project, index) => [project.id, index]));
   const beforePhaseOrder = db.subprojects.map(s => `${s.projectId}:${s.name}`).join('|');
-  db.subprojects.sort((a, b) => a.projectId === b.projectId ? (phaseOrder.get(a.name) ?? 999) - (phaseOrder.get(b.name) ?? 999) : (projectOrder.get(a.projectId) ?? 999) - (projectOrder.get(b.projectId) ?? 999));
+  db.subprojects.sort((a, b) => a.projectId === b.projectId ? (templateForProject(a.projectId).indexOf(a.name) >= 0 ? templateForProject(a.projectId).indexOf(a.name) : 999) - (templateForProject(b.projectId).indexOf(b.name) >= 0 ? templateForProject(b.projectId).indexOf(b.name) : 999) : (projectOrder.get(a.projectId) ?? 999) - (projectOrder.get(b.projectId) ?? 999));
   if (beforePhaseOrder !== db.subprojects.map(s => `${s.projectId}:${s.name}`).join('|')) created++;
   return created;
 }
 
 let db = loadDB();
 if (!(db.systems || []).some(s => s.id === 'SYS-ADMIN')) {
-  db.systems.push({ id:'SYS-ADMIN', name:'System Administrator', owner:'IT', color:'#8b5cf6', tech:'Administration', repo:'', envDev:'', envStaging:'', envProd:'', health:'On Track', category:'Non-developing', updatedAt:nowISO() });
+  db.systems.push({ id:'SYS-ADMIN', name:'IT Operations & System Administration', owner:'IT', color:'#8b5cf6', tech:'Administration', repo:'', envDev:'', envStaging:'', envProd:'', health:'On Track', category:'Non-developing', updatedAt:nowISO() });
   saveDB(db);
 }
 // Remove the retired BRD phase from existing projects while preserving its tasks and activity history.
@@ -451,6 +505,12 @@ if (retiredBrdIds.size) {
 const DEFAULT_COLORS = { 'SYS-HRIS': '#3b82f6', 'SYS-INV': '#f59e0b', 'SYS-POS': '#22c55e', 'SYS-CRM': '#a855f7', 'SYS-WEB': '#ec4899' };
 let migrated = false;
 if (!db.projects) { db.projects = deriveProjects(db.tasks || []); db.subprojects = db.subprojects || []; migrated = true; }
+const adminSystem = (db.systems || []).find(s => s.id === 'SYS-ADMIN');
+if (adminSystem && adminSystem.name !== 'IT Operations & System Administration') {
+  adminSystem.name = 'IT Operations & System Administration';
+  adminSystem.updatedAt = nowISO();
+  migrated = true;
+}
 for (const s of (db.systems || [])) {
   if (!s.color) { s.color = DEFAULT_COLORS[s.id] || '#64748b'; migrated = true; }
 }
@@ -483,6 +543,31 @@ const templateBackfill = ensureProjectTemplates();
 if (templateBackfill) { log(db, 'System', `Backfilled SDLC template phases: ${templateBackfill} phases added`); migrated = true; }
 if (migrated) { log(db, 'System', 'Migrated DB (stages, projects, assignee)'); saveDB(db); }
 
+async function initializeTrackerStore() {
+  if (!trackerStore) return;
+  const remoteState = await trackerStore.initialize(db);
+  let remoteMigrated = false;
+  if (remoteState && typeof remoteState === 'object') {
+    db = remoteState;
+    db.systems = db.systems || [];
+    const adminSystem = db.systems.find(s => s.id === 'SYS-ADMIN');
+    if (adminSystem && adminSystem.name !== 'IT Operations & System Administration') {
+      adminSystem.name = 'IT Operations & System Administration';
+      adminSystem.updatedAt = nowISO();
+      remoteMigrated = true;
+    }
+    const templateBackfill = ensureProjectTemplates();
+    if (templateBackfill) {
+      log(db, 'System', `Backfilled workflow templates: ${templateBackfill} phases/tasks added`);
+      remoteMigrated = true;
+    }
+    writeLocalDB(db);
+  }
+  trackerStoreReady = true;
+  if (remoteMigrated) saveDB(db);
+  console.log(`[tracker-db] PostgreSQL source of truth enabled (${trackerStore.table})`);
+}
+
 const app = express();
 app.use(cors({
   origin(origin, callback) {
@@ -499,6 +584,10 @@ app.use(cors({
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'public'), { setHeaders: res => res.set('Cache-Control', 'no-store') }));
 app.use('/api', (req,res,next)=>{ res.set('Cache-Control','no-store'); next(); });
+app.use('/api', async (req, res, next) => {
+  try { await trackerReadyPromise; next(); }
+  catch (error) { next(error); }
+});
 app.get('/api/events', (req,res)=>{
   res.set({'Content-Type':'text/event-stream','Cache-Control':'no-cache','Connection':'keep-alive'}); res.flushHeaders?.();
   res.write(`data: ${JSON.stringify({type:'connected'})}\n\n`); eventClients.add(res); req.on('close',()=>eventClients.delete(res));
@@ -541,7 +630,7 @@ function computeStats() {
 }
 
 // ---------- API (open access, no login) ----------
-app.get('/api/health', (req, res) => res.json({ ok: true, ...db.meta, time: nowISO() }));
+app.get('/api/health', (req, res) => res.json({ ok: true, ...db.meta, storage: trackerStore ? 'postgres' : 'json', time: nowISO() }));
 app.get('/api/auth', (req, res) => res.json({ required: !!AUTH_TOKEN }));
 app.get('/api/meta', (req, res) => res.json({ statuses: STATUSES, priorities: PRIORITIES, types: TYPES, environments: ENVS }));
 
@@ -642,33 +731,35 @@ function applyTemplateToProject(projectId){
   const p = db.projects.find(x=>x.id===projectId);
   if(!p) return null;
   const system = (db.systems || []).find(s => s.id === p.systemId);
-  if (p.systemId === 'SYS-ADMIN' || system?.category === 'Non-developing') return { phases: [], tasksCreated: 0, skipped: true };
+  const adminWorkflow = isNonDevelopingSystem(system);
+  const template = adminWorkflow ? ADMIN_PROJECT_TEMPLATE : PROJECT_TEMPLATE;
+  const phaseTasks = adminWorkflow ? ADMIN_PHASE_TASKS : PROJECT_PHASE_TASKS;
   const existing = new Set((db.subprojects||[]).filter(s=>s.projectId===projectId).map(s=>s.name.toLowerCase().trim()));
   let created=[];
   let tasksCreated=0;
-  for(const name of PROJECT_TEMPLATE){
+  for(const name of template){
     if(existing.has(name.toLowerCase())) continue;
     const s={ id: uid('SUB'), projectId, name, description:'', deadline:'', startDate:'', stage:'', createdAt: nowISO(), updatedAt: nowISO() };
     db.subprojects.push(s); created.push(s);
     existing.add(name.toLowerCase());
   }
-  for (const [phaseName, taskTitles] of Object.entries(PROJECT_PHASE_TASKS)) {
+  for (const [phaseName, taskTitles] of Object.entries(phaseTasks)) {
     const phase = (db.subprojects || []).find(s => s.projectId === projectId && s.name === phaseName);
     if (!phase) continue;
     for (const title of taskTitles) {
       const exists = (db.tasks || []).some(t => t.projectId === projectId && t.subprojectId === phase.id && String(t.title || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '') === title.toLowerCase().replace(/[^a-z0-9]+/g, ''));
       if (exists) continue;
-      db.tasks.push({ id: uid('T'), title, systemId: p.systemId, project: p.name, projectId, subprojectId: phase.id, type:'Task', priority:'Medium', status:'Pipeline', assignee:p.assignee || 'Unassigned', reporter:'System Template', due:'', startDate:'', branch:'', pr:'', estimate:1, progress:0, labels:['sdlc-template'], description:'', updates:[], deployments:[], createdAt:nowISO(), updatedAt:nowISO() });
+      db.tasks.push({ id: uid('T'), title, systemId: p.systemId, project: p.name, projectId, subprojectId: phase.id, type:'Task', priority:'Medium', status:'Pipeline', assignee:p.assignee || 'Unassigned', reporter:adminWorkflow?'Admin Workflow Template':'System Template', due:'', startDate:'', branch:'', pr:'', estimate:1, progress:0, labels:[adminWorkflow?'admin-template':'sdlc-template'], description:'', updates:[], deployments:[], createdAt:nowISO(), updatedAt:nowISO() });
       tasksCreated++;
     }
   }
-  if(created.length || tasksCreated){ log(db,'User',`SDLC template applied to ${p.name}: +${created.length} phases, +${tasksCreated} starter tasks`); saveDB(db); }
-  return { phases: created, tasksCreated, skipped: false };
+  if(created.length || tasksCreated){ log(db,'User',`${adminWorkflow?'Admin workflow':'SDLC template'} applied to ${p.name}: +${created.length} phases, +${tasksCreated} starter tasks`); saveDB(db); }
+  return { phases: created, tasksCreated, skipped: false, adminWorkflow };
 }
 
 // projects + sub-projects (progress derived, never stored) — project status is manual + auto-derived fallback
 app.get('/api/projects', (req, res) => res.json(enrichProjects()));
-app.get('/api/templates', (req, res) => res.json({ template: PROJECT_TEMPLATE, phaseTasks: PROJECT_PHASE_TASKS }));
+app.get('/api/templates', (req, res) => res.json({ template: PROJECT_TEMPLATE, phaseTasks: PROJECT_PHASE_TASKS, adminTemplate: ADMIN_PROJECT_TEMPLATE, adminPhaseTasks: ADMIN_PHASE_TASKS }));
 app.get('/api/projects/:id/report.pptx', async (req, res) => {
   const payload = reportProjectData(req.params.id);
   if (!payload) return res.status(404).json({ error: 'project not found' });
@@ -769,9 +860,8 @@ app.post('/api/projects/:id/apply-template', (req,res)=>{
   const p=db.projects.find(x=>x.id===req.params.id);
   if(!p) return res.status(404).json({error:'not found'});
   const result = applyTemplateToProject(p.id) || { phases: [], tasksCreated: 0, skipped: false };
-  if(result.skipped) return res.json({ ok:true, created:0, tasksCreated:0, phases:[], message:'SDLC template is only available for development systems' });
-  if(!result.phases.length && !result.tasksCreated) return res.json({ ok:true, created:0, tasksCreated:0, phases:[], message:'All SDLC phases and starter tasks already exist' });
-  res.json({ ok:true, created: result.phases.length, tasksCreated: result.tasksCreated, phases: result.phases.map(s=>s.name) });
+  if(!result.phases.length && !result.tasksCreated) return res.json({ ok:true, created:0, tasksCreated:0, phases:[], message: result.adminWorkflow ? 'All admin workflow phases and starter tasks already exist' : 'All SDLC phases and starter tasks already exist' });
+  res.json({ ok:true, created: result.phases.length, tasksCreated: result.tasksCreated, workflow: result.adminWorkflow ? 'system-administration' : 'sdlc', phases: result.phases.map(s=>s.name) });
 });
 app.post('/api/subprojects', (req, res) => {
   const s = { id: uid('SUB'), description: '', deadline: '', createdAt: nowISO(), updatedAt: nowISO(), ...req.body };
@@ -939,7 +1029,18 @@ app.post('/api/reset', (req, res) => {
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n  Madison Dev Tracker live at http://localhost:${PORT}`);
-  console.log(`  LAN access: http://<your-pc-ip>:${PORT}\n`);
-});
+async function startServer() {
+  trackerReadyPromise = initializeTrackerStore();
+  try {
+    await trackerReadyPromise;
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`\n  Madison Dev Tracker live at http://localhost:${PORT}`);
+      console.log(`  LAN access: http://<your-pc-ip>:${PORT}\n`);
+    });
+  } catch (error) {
+    console.error('[tracker-db] startup failed:', error.message);
+    await trackerStore?.close().catch(() => undefined);
+    process.exit(1);
+  }
+}
+startServer();
