@@ -48,6 +48,7 @@ const eventClients = new Set();
 
 const STATUSES = ['Pipeline', 'Development', 'UAT', 'Live', 'On Hold'];
 const PHASE_PROGRESS_STATUSES = ['Not Started', 'In Progress', 'Done'];
+const PHASE_STATUS_STAGE = { 'Not Started': 'Pipeline', 'In Progress': 'Development', 'Done': 'Live' };
 const DEVELOPER_OVERHEAD = { 'John Carlo Manalo': 10, 'Mhark Anthony Pentinio': 10, 'Stephanie Joyce Guce': 10 };
 const PRIORITIES = ['Critical', 'High', 'Medium', 'Low'];
 const TYPES = ['Feature', 'Bug', 'Hotfix', 'Improvement', 'Task', 'Incident', 'Docs', 'Change Request'];
@@ -216,6 +217,10 @@ function subStage(list, fallback){
   if(list.some(t=>t.status==='Development')) return 'Development';
   return 'Pipeline';
 }
+function phaseStage(phase, tasks){
+  const explicit = PHASE_STATUS_STAGE[phase?.phaseStatus];
+  return explicit || subStage(tasks, phase?.stage);
+}
 function orderedProjectSubprojects(projectId){
   const order = new Map(templateForProject(projectId).map((name, index) => [name, index]));
   return (db.subprojects || []).filter(s => s.projectId === projectId).sort((a, b) => (order.get(a.name) ?? 999) - (order.get(b.name) ?? 999));
@@ -227,7 +232,7 @@ function enrichProjects(includeBenefits = true) {
     for (const t of ts) if (byStage[t.status] !== undefined) byStage[t.status]++;
     const { benefits: storedBenefits, benefitsCalc: _storedBenefitsCalc, ...safeProject } = p;
     const benefitFields = includeBenefits ? { benefits: normalizeBenefits(storedBenefits), benefitsCalc: calculateBenefits(storedBenefits) } : {};
-    return { ...safeProject, ...benefitFields, ...subStats(ts), byStage, subprojects: orderedProjectSubprojects(p.id).map(s => { const st = ts.filter(t => t.subprojectId === s.id); const stage=subStage(st, s.stage); const stats=subStats(st); return { ...s, ...stats, pct: st.length ? stats.pct : (STATUS_PROGRESS[stage] ?? 0), stage }; }) };
+    return { ...safeProject, ...benefitFields, ...subStats(ts), byStage, subprojects: orderedProjectSubprojects(p.id).map(s => { const st = ts.filter(t => t.subprojectId === s.id); const stage=phaseStage(s, st); const stats=subStats(st); const explicitPct = PHASE_STATUS_STAGE[s.phaseStatus] ? (STATUS_PROGRESS[stage] ?? 0) : null; return { ...s, ...stats, pct: explicitPct ?? (st.length ? stats.pct : (STATUS_PROGRESS[stage] ?? 0)), stage }; }) };
   });
 }
 
@@ -425,6 +430,7 @@ function ensureProjectTemplates() {
   let created = 0;
   db.subprojects = db.subprojects || [];
   for (const p of (db.projects || [])) {
+    if (typeof IMPORTED_PROJECT_SCHEDULE !== 'undefined' && IMPORTED_PROJECT_SCHEDULE.some(spec => spec.customOnly && spec.name === p.name)) continue;
     const system = (db.systems || []).find(s => s.id === p.systemId);
     if (isNonDevelopingSystem(system)) {
       const existing = new Set((db.subprojects || []).filter(s => s.projectId === p.id).map(s => String(s.name || '').trim().toLowerCase()));
@@ -506,6 +512,90 @@ function ensureProjectTemplates() {
   return created;
 }
 
+// Imported project schedules from the source tracker. This is idempotent so the
+// VPS/Postgres source of truth receives the same records after every deployment.
+const IMPORTED_PROJECT_SCHEDULE = [
+  { name:'Cash Flow Reporting System', status:'Live', assignee:'Mhark Anthony Pentinio', startDate:'2026-03-24', deadline:'2026-07-06', phases:[
+    ['Technical Analysis','','','Done','Live'], ['Technical Design','','','Done','Live'], ['Coding Development','2026-03-23','2026-04-20','Done','Live'], ['System Internal Testing (SIT)','2026-04-20','2026-05-04','Done','Live'], ['UAT','2026-05-08','2026-06-03','Done','Live'], ['Go Live','2026-06-22','2026-07-06','Done','Live'], ['Hypercare','2026-07-06','2026-09-07','Done','Live']
+  ]},
+  { name:'Proto Tracking System', status:'Live', assignee:'Mhark Anthony Pentinio', startDate:'2026-03-09', deadline:'2026-07-06', phases:[
+    ['Technical Analysis','','','Done','Live'], ['Technical Design','','','Done','Live'], ['Coding Development','2026-03-09','2026-04-27','Done','Live'], ['System Internal Testing (SIT)','2026-04-27','2026-06-29','Done','Live'], ['UAT','2026-05-25','2026-06-08','Done','Live'], ['Go Live','2026-06-22','2026-07-06','Done','Live'], ['Hypercare','2026-07-06','2026-09-07','Done','Live']
+  ]},
+  { name:'HRIS (Performance Evaluation)', status:'Live', assignee:'Stephanie Joyce Guce', startDate:'2026-02-23', deadline:'2026-07-17', customOnly:true, phases:[
+    ['Deployment MLO','2026-06-19','2026-07-17','Done','Live'], ['Performance Evaluation','2026-06-15','2026-07-17','Done','Live']
+  ]},
+  { name:'PBI Logistic Enhancement', status:'Live', assignee:'Stephanie Joyce Guce', startDate:'2026-08-12', deadline:'2026-09-22', phases:[
+    ['Technical Analysis','2026-08-12','2026-08-13','Done','Live'], ['Technical Design','2026-08-13','2026-08-14','Done','Live'], ['Coding Development','2026-08-14','2026-08-25','Done','Live'], ['System Internal Testing (SIT)','2026-08-25','2026-09-10','Done','Live'], ['UAT','2026-09-10','2026-09-18','Done','Live'], ['Go Live','2026-09-18','2026-09-22','Done','Live'], ['Hypercare','2026-09-22','2026-11-22','Done','Live']
+  ]},
+  { name:'Digital Packing List Optimizer', status:'Live', assignee:'Stephanie Joyce Guce', startDate:'2026-08-10', deadline:'2026-10-01', phases:[
+    ['Technical Analysis','2026-08-14','2026-08-17','Done','Live'], ['Technical Design','2026-08-17','2026-08-19','Done','Live'], ['Coding Development','2026-08-19','2026-09-01','Done','Live'], ['System Internal Testing (SIT)','2026-09-01','2026-09-21','Done','Live'], ['UAT','2026-09-21','2026-09-24','Done','Live'], ['Go Live','2026-09-25','2026-10-01','Done','Live'], ['Hypercare','2026-10-01','','In Progress','Development']
+  ]},
+  { name:'Trim Summary Automation', status:'On Hold', assignee:'Mhark Anthony Pentinio', startDate:'2026-06-22', deadline:'2026-10-30', phases:[
+    ['Technical Analysis','','','Done','Live'], ['Technical Design','','','Done','Live'], ['Coding Development','2026-07-06','2026-08-24','Done','Live'], ['System Internal Testing (SIT)','2026-08-24','2026-09-07','Done','Live'], ['UAT','2026-09-07','','In Progress','Development'], ['Go Live','','','Not Started','Pipeline'], ['Hypercare','','','Not Started','Pipeline']
+  ]},
+  { name:'AP Invoice Automation Platform', status:'Development', assignee:'John Carlo Manalo', startDate:'2026-06-15', deadline:'2026-11-06', phases:[
+    ['Technical Analysis','2026-06-15','2026-06-16','Done','Live'], ['Technical Design','2026-07-17','2026-07-23','Done','Live'], ['Coding Development','2026-06-24','2026-09-27','Done','Live'], ['System Internal Testing (SIT)','2026-09-28','2026-10-11','Done','Live'], ['UAT','2026-10-12','2026-10-23','In Progress','Development'], ['Go Live','2026-10-24','2026-11-06','Not Started','Pipeline'], ['Hypercare','2026-11-07','2026-12-04','Not Started','Pipeline']
+  ]},
+  { name:'Po Cutting', status:'Development', assignee:'John Carlo Manalo', startDate:'2026-05-11', deadline:'2026-11-13', phases:[
+    ['Technical Analysis','','','Done','Live'], ['Technical Design','','','Done','Live'], ['Coding Development','2026-09-14','2026-10-09','Done','Live'], ['System Internal Testing (SIT)','2026-10-12','2026-10-28','In Progress','Development'], ['UAT','2026-10-19','2026-10-30','Not Started','Pipeline'], ['Go Live','2026-11-09','2026-11-13','Not Started','Pipeline'], ['Hypercare','2026-11-16','2027-02-16','Not Started','Pipeline']
+  ]},
+  { name:'Smart Techpack Automation', status:'Development', assignee:'Mhark Anthony Pentinio', startDate:'2026-08-10', deadline:'2026-11-27', phases:[
+    ['Technical Analysis','','','Done','Live'], ['Technical Design','','','Done','Live'], ['Coding Development','2026-08-17','2026-10-16','In Progress','Development'], ['System Internal Testing (SIT)','2026-10-16','2026-10-30','Not Started','Pipeline'], ['UAT','2026-10-30','2026-11-13','Not Started','Pipeline'], ['Go Live','2026-11-13','2026-11-27','Not Started','Pipeline'], ['Hypercare','2026-11-27','2027-01-27','Not Started','Pipeline']
+  ]},
+  { name:'HRIS (Onboarding and Offboarding)', status:'Development', assignee:'Stephanie Joyce Guce', startDate:'2026-10-08', deadline:'2027-01-21', phases:[
+    ['Technical Analysis','2026-10-15','2026-10-16','In Progress','Development'], ['Technical Design','2026-10-16','2026-10-30','In Progress','Development'], ['Coding Development','2026-11-02','2026-11-30','Not Started','Pipeline'], ['System Internal Testing (SIT)','2026-12-03','2026-12-17','Not Started','Pipeline'], ['UAT','2026-12-17','2027-01-07','Not Started','Pipeline'], ['Go Live','2027-01-07','2027-01-21','Not Started','Pipeline'], ['Hypercare','2027-01-21','2027-03-21','Not Started','Pipeline']
+  ]},
+  { name:'Budget Management System', status:'On Hold', assignee:'John Carlo Manalo', startDate:'2026-05-04', deadline:'', phases:[
+    ['Technical Analysis','2026-05-04','2026-05-05','Done','Live'], ['Technical Design','2026-05-06','2026-05-12','Done','Live'], ['Coding Development','2026-05-13','2026-06-09','Done','Live'], ['System Internal Testing (SIT)','2026-06-29','2026-07-23','Done','Live'], ['UAT','','','Not Started','Pipeline'], ['Go Live','','','Not Started','Pipeline'], ['Hypercare','','','Not Started','Pipeline']
+  ]},
+  { name:'Product QR Code Tracker', status:'Pipeline', assignee:'John Carlo Manalo', startDate:'', deadline:'', phases:[
+    ['Technical Analysis','','','Not Started','Pipeline'], ['Technical Design','','','Not Started','Pipeline'], ['Coding Development','','','Not Started','Pipeline'], ['System Internal Testing (SIT)','','','Not Started','Pipeline'], ['UAT','','','Not Started','Pipeline'], ['Go Live','','','Not Started','Pipeline'], ['Hypercare','','','Not Started','Pipeline']
+  ]},
+  { name:'Smart Techpack to Costing', status:'On Hold', assignee:'John Carlo Manalo', startDate:'2026-08-17', deadline:'', phases:[
+    ['Technical Analysis','2026-08-17','2026-08-18','Done','Live'], ['Technical Design','2026-08-19','2026-08-25','Done','Live'], ['Coding Development','2026-08-26','2026-11-30','Done','Live'], ['System Internal Testing (SIT)','2026-09-09','2026-09-22','Done','Live'], ['UAT','','','Not Started','Pipeline'], ['Go Live','','','Not Started','Pipeline'], ['Hypercare','','','Not Started','Pipeline']
+  ]},
+  { name:'PBD Command Tower', status:'Pipeline', assignee:'John Carlo Manalo', startDate:'', deadline:'', phases:[
+    ['Technical Analysis','','','Not Started','Pipeline'], ['Technical Design','','','Not Started','Pipeline'], ['Coding Development','','','Not Started','Pipeline'], ['System Internal Testing (SIT)','','','Not Started','Pipeline'], ['UAT','','','Not Started','Pipeline'], ['Go Live','','','Not Started','Pipeline'], ['Hypercare','','','Not Started','Pipeline']
+  ]},
+  { name:'PBD Brand Analysis Report', status:'On Hold', assignee:'John Carlo Manalo', startDate:'2026-04-13', deadline:'', customOnly:true, phases:[] }
+];
+
+function ensureImportedProjectSchedule() {
+  let changed = 0;
+  db.projects = db.projects || [];
+  db.subprojects = db.subprojects || [];
+  for (const spec of IMPORTED_PROJECT_SCHEDULE) {
+    let project = db.projects.find(p => p.name === spec.name && p.systemId === 'SYS-HQ');
+    if (!project) {
+      project = { id: uid('PRJ'), systemId:'SYS-HQ', name:spec.name, description:`${spec.name} project schedule imported from source tracker.`, deadline:spec.deadline, startDate:spec.startDate, assignee:spec.assignee, status:spec.status, benefits:normalizeBenefits(), createdAt:nowISO(), updatedAt:nowISO() };
+      db.projects.push(project); changed++;
+    } else {
+      const fields = { systemId:'SYS-HQ', assignee:spec.assignee, status:spec.status, startDate:spec.startDate, deadline:spec.deadline };
+      for (const [key, value] of Object.entries(fields)) if (project[key] !== value) { project[key] = value; project.updatedAt = nowISO(); changed++; }
+      if (!project.benefits) { project.benefits = normalizeBenefits(); changed++; }
+    }
+    if (spec.customOnly) {
+      const retiredIds = new Set(db.subprojects.filter(s => s.projectId === project.id && PROJECT_TEMPLATE.includes(s.name)).map(s => s.id));
+      if (retiredIds.size) {
+        db.subprojects = db.subprojects.filter(s => !retiredIds.has(s.id));
+        db.tasks = (db.tasks || []).filter(t => !retiredIds.has(t.subprojectId));
+        changed += retiredIds.size;
+      }
+    }
+    for (const [name, startDate, deadline, phaseStatus, stage] of spec.phases) {
+      let phase = db.subprojects.find(s => s.projectId === project.id && s.name === name);
+      if (!phase) {
+        phase = { id:uid('SUB'), projectId:project.id, name, description:'', deadline, startDate, stage, phaseStatus, createdAt:nowISO(), updatedAt:nowISO() };
+        db.subprojects.push(phase); changed++;
+        continue;
+      }
+      const fields = { startDate, deadline, stage, phaseStatus };
+      for (const [key, value] of Object.entries(fields)) if ((phase[key] || '') !== value) { phase[key] = value; phase.updatedAt = nowISO(); changed++; }
+    }
+  }
+  return changed;
+}
+
 let db = loadDB();
 if (!(db.systems || []).some(s => s.id === 'SYS-ADMIN')) {
   db.systems.push({ id:'SYS-ADMIN', name:'Infrastructure & System Administration', owner:'IT', color:'#8b5cf6', tech:'Infrastructure & Administration', repo:'', envDev:'', envStaging:'', envProd:'', health:'On Track', category:'Non-developing', updatedAt:nowISO() });
@@ -558,6 +648,8 @@ if (db.sprints) { delete db.sprints; migrated = true; }
 if (db.users || db.sessions) { delete db.users; delete db.sessions; migrated = true; }
 const templateBackfill = ensureProjectTemplates();
 if (templateBackfill) { log(db, 'System', `Backfilled SDLC template phases: ${templateBackfill} phases added`); migrated = true; }
+const scheduleBackfill = ensureImportedProjectSchedule();
+if (scheduleBackfill) { log(db, 'System', `Imported project schedules: ${scheduleBackfill} records updated`); migrated = true; }
 if (migrated) { log(db, 'System', 'Migrated DB (stages, projects, assignee)'); saveDB(db); }
 
 async function initializeTrackerStore() {
@@ -576,6 +668,11 @@ async function initializeTrackerStore() {
     const templateBackfill = ensureProjectTemplates();
     if (templateBackfill) {
       log(db, 'System', `Backfilled workflow templates: ${templateBackfill} phases/tasks added`);
+      remoteMigrated = true;
+    }
+    const scheduleBackfill = ensureImportedProjectSchedule();
+    if (scheduleBackfill) {
+      log(db, 'System', `Imported project schedules: ${scheduleBackfill} records updated`);
       remoteMigrated = true;
     }
     writeLocalDB(db);
@@ -893,6 +990,7 @@ app.post('/api/subprojects', (req, res) => {
   if (!db.projects.some(p => p.id === s.projectId)) return res.status(400).json({ error: 'unknown project' });
   if (s.phaseStatus && !PHASE_PROGRESS_STATUSES.includes(String(s.phaseStatus))) return res.status(400).json({ error: 'phase status must be Not Started, In Progress, or Done' });
   s.phaseStatus = s.phaseStatus || 'Not Started';
+  s.stage = PHASE_STATUS_STAGE[s.phaseStatus] || s.stage || 'Pipeline';
   db.subprojects.push(s); log(db, req.body.by || 'User', `Sub-project created: ${s.name}`); saveDB(db);
   res.status(201).json(s);
 });
@@ -902,6 +1000,7 @@ app.patch('/api/subprojects/:id', (req, res) => {
   if (req.body.phaseStatus && !PHASE_PROGRESS_STATUSES.includes(String(req.body.phaseStatus))) return res.status(400).json({ error: 'phase status must be Not Started, In Progress, or Done' });
   Object.assign(s, req.body);
   s.phaseStatus = s.phaseStatus || 'Not Started';
+  if (req.body.phaseStatus) s.stage = PHASE_STATUS_STAGE[s.phaseStatus];
   saveDB(db); res.json(s);
 });
 app.delete('/api/subprojects/:id', (req, res) => {
